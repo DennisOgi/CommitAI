@@ -1,0 +1,17 @@
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+ios/Pods/
+ios/.symlinks/
+android/.gradle/
+android/local.properties
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+
+# Per-environment build settings (flutter run --dart-define-from-file=env/<name>.json)
+env/*.json
+!env/example.json

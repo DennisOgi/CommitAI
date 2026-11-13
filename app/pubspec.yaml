@@ -1,0 +1,64 @@
+name: commit_ai
+description: Commit AI — business calling that remembers every promise.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+  flutter: ">=3.27.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  daily_flutter: ^0.41.0          # Daily WebRTC calls (app-to-app, and the app leg of PSTN calls)
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
+  permission_handler: ^11.3.1
+  local_auth: ^2.3.0              # biometric re-entry to Work mode
+  supabase_flutter: ^2.8.0        # personal sign-in (optional; demo works without it)
+  firebase_core: ^3.6.0           # push for incoming calls + reminders (optional)
+  firebase_messaging: ^15.1.3
+  flutter_callkit_incoming: ^2.5.0  # native incoming-call screen (CallKit / Android full-screen)
+  flutter_secure_storage: ^11.2.0
+  google_fonts: ^8.2.1
+  url_launcher: ^6.3.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.7
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/branding/logo_mark.png
+    - assets/branding/logo_wordmark.png
+    - assets/branding/glyph.png
+    - assets/branding/wordmark_text.png
+
+# App icon: `dart run flutter_launcher_icons`. Art in assets/branding is built from the supplied logo
+# (assets/branding/source) by assets/branding/source/build_brand_assets.py.
+flutter_launcher_icons:
+  image_path: assets/branding/icon.png
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  adaptive_icon_background: assets/branding/icon_background.png
+  adaptive_icon_foreground: assets/branding/icon_foreground.png
+  windows:
+    generate: true
+    image_path: assets/branding/icon.png
+    icon_size: 256
+
+# Native launch screen in the brand ink colour: `dart run flutter_native_splash:create`
+flutter_native_splash:
+  color: "#0B0D12"
+  image: assets/branding/splash.png
+  android_12:
+    color: "#0B0D12"
+    image: assets/branding/icon_foreground.png
+    icon_background_color: "#0046DC"
+    branding: assets/branding/splash_branding.png
+  web: false

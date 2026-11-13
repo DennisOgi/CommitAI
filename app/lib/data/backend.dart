@@ -1,0 +1,71 @@
+import 'dart:async';
+
+import '../models/models.dart';
+
+/// An incoming call surfaced to the UI (from FCM push, or the demo simulator).
+class IncomingCall {
+  IncomingCall({required this.callId, required this.callerName, required this.recorded, required this.mode, this.roomUrl});
+  final String callId;
+  final String callerName;
+  final bool recorded;
+  final AppMode mode;
+  final String? roomUrl;
+}
+
+typedef CorporateLoginResult = ({String corpSession, Session session, List<HeldCall> held});
+typedef AcceptResult = ({String roomUrl, String token, bool recorded, String? disclosure});
+
+abstract class Backend {
+  /// Incoming calls and "held while you were at work" notices.
+  final incoming = StreamController<IncomingCall>.broadcast();
+
+  Future<Session> me();
+  Future<CorporateLoginResult> corporateLogin(String corpCode, String employeeId, String pin);
+  Future<List<HeldCall>> setMode(AppMode mode, {String? corpSession});
+
+  Future<List<Contact>> contacts();
+  Future<Contact> addContact({required String name, String? company, String? phone, String? email});
+
+  Future<List<CallRecord>> calls();
+  Future<CallStart> startCall({bool pstn = false, String? calleeUserId, String? phone, String? contactId, String? displayName});
+  Future<AcceptResult> acceptCall(String callId);
+  Future<void> declineCall(String callId);
+  Future<void> endCall(String callId);
+  Future<CallDetail> callDetail(String callId);
+  Future<CallDetail> submitReview(
+    String callId, {
+    required List<String> accept,
+    required List<String> reject,
+    Map<String, Map<String, dynamic>> edits = const {},
+    List<Map<String, dynamic>> add = const [],
+  });
+
+  Future<List<Commitment>> commitments({bool team = false, String? memberId, String? status});
+  Future<Commitment> updateCommitment(String id, {CommitmentStatus? status, String? title, DateTime? dueAt, String? note});
+  Future<void> comment(String id, String text);
+  Future<void> nudge(String id);
+  Future<List<CommitmentEvent>> events(String id);
+  Future<Dashboard> dashboard({int days = 30});
+
+  Future<void> registerDevice(String platform, String? pushToken);
+
+  /// The employee flagged a moment of a live work call as a commitment.
+  Future<void> flagMoment(String callId, int offsetMs) async {}
+
+  /// Send a client-side failure (e.g. couldn't join the call audio) to the server log.
+  Future<void> reportProblem(String where, String message, {String? callId}) async {}
+
+  /// Calls ringing for this user now (polled when push isn't configured).
+  Future<List<IncomingCall>> ringing() async => const [];
+
+  /// Run extraction on a call without a live bot (demo + dev servers).
+  Future<void> simulateExtraction(String callId);
+}
+
+class ApiException implements Exception {
+  ApiException(this.status, this.message);
+  final int status;
+  final String message;
+  @override
+  String toString() => message;
+}

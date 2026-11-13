@@ -1,0 +1,21 @@
+server/.env
+server/.venv/
+server/**/__pycache__/
+server/.pytest_cache/
+server/firebase-service-account.json
+
+# Local voice samples / caches
+server/*.wav
+
+# Local dev tools (cloudflared tunnel)
+tools/
+
+# Built test APKs
+*.apk
+
+# Editors / OS / logs
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

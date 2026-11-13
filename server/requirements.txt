@@ -1,0 +1,14 @@
+pipecat-ai[daily,openai]>=1.16,<2
+fastapi>=0.115
+uvicorn[standard]>=0.30
+httpx>=0.27
+pydantic>=2.7
+pyjwt[crypto]>=2.9
+bcrypt>=4.2
+google-auth>=2.30        # FCM HTTP v1 (optional)
+loguru>=0.7
+tzdata>=2024.1          # IANA timezones on Windows / slim images
+phonenumbers>=8.13       # mobile vs landline classification, any country
+# tests
+pytest>=8
+pytest-asyncio>=0.24
