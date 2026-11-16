@@ -1,0 +1,46 @@
+# Render Blueprint: one always-on web service running the Commit AI API and its call bots.
+# Render → New → Blueprint → pick this repo. Secrets marked `sync: false` are asked for once.
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: commitai-api
+    runtime: docker
+    rootDir: server
+    dockerfilePath: ./Dockerfile
+    # Always on (no sleeping): the call bot must be able to start at any moment.
+    # Starter (512 MB) handles a few simultaneous calls; choose "standard" for more.
+    plan: starter
+    region: frankfurt          # closest Render region to Nigeria
+    healthCheckPath: /health
+    autoDeploy: true           # redeploys on every push to main
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEV_AUTH
+        value: "false"
+      - key: BOTS_ENABLED
+        value: "true"
+      - key: LOG_LEVEL
+        value: INFO
+      # Set to this service's own https address after the first deploy,
+      # e.g. https://commitai-api.onrender.com (the bot calls back to it).
+      - key: PUBLIC_URL
+        sync: false
+      - key: INTERNAL_API_KEY
+        generateValue: true    # Render generates a long random secret
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: DAILY_API_KEY
+        sync: false
+      - key: DAILY_CALLER_ID
+        sync: false
+      - key: DAILY_DIALIN_HMAC
+        sync: false
+      - key: AI_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite

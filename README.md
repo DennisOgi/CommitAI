@@ -495,6 +495,12 @@ has been exercised end to end with simulated participants.
 
 ## Deploying to production
 
+**Quickest path: Render.** `render.yaml` describes the service. In Render: **New → Blueprint**, pick this
+repository, fill in the secrets it asks for (Supabase, Daily, Gemini), deploy, then set `PUBLIC_URL` to the
+service's own `https://….onrender.com` address and redeploy. Use a paid instance (always on); free
+instances sleep and would drop calls. Build the app with `API_URL` set to that address. (Vercel and similar
+serverless platforms can't run the call bot, which holds a live audio connection for the whole call.)
+
 1. **Server:** build the `server/Dockerfile` image (it runs as a non-root user with a health check) on a
    small Linux VM or container host. Set `APP_ENV=production`, an HTTPS `PUBLIC_URL`,
    `DEV_AUTH=false`, a strong `INTERNAL_API_KEY`, Supabase, Daily, Gemini and `DAILY_DIALIN_HMAC`.
