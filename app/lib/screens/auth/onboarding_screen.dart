@@ -126,11 +126,12 @@ class _IdentitiesPage extends StatelessWidget {
   Widget build(BuildContext context) => const _Page(
         kicker: 'Two identities',
         title: 'One phone.\nPersonal and Work.',
-        body: 'Switch with one tap. In Personal mode Commit AI is a private phone: nothing is recorded or shared. '
+        body: 'Switch with one tap. In Personal mode your calls are recorded only so you can keep track of what you '
+            'promised: those commitments are yours alone and never reach your company (you can turn this off). '
             'In Work mode your client calls are recorded and their commitments tracked, and personal calls are held '
             'until you switch back.',
         art: Row(children: [
-          Expanded(child: _ModeCard(p: ModePalette.personal, lines: ['Private calls', 'Never recorded', 'Your contacts'])),
+          Expanded(child: _ModeCard(p: ModePalette.personal, lines: ['Private calls', 'Commitments for you only', 'Your contacts'])),
           SizedBox(width: 12),
           Expanded(child: _ModeCard(p: ModePalette.corporate, lines: ['Client calls', 'Recorded & tracked', 'Company directory'])),
         ]),

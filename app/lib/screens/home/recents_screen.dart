@@ -50,7 +50,7 @@ class RecentsScreen extends StatelessWidget {
                 title: app.corporate ? 'No work calls yet' : 'No calls yet',
                 body: app.corporate
                     ? 'Call a client from the keypad or Clients tab. Commit AI will catch every commitment.'
-                    : 'Personal calls are private: never recorded, never shared.',
+                    : 'Personal calls are private: commitments you make are tracked for you alone, never shared with your company.',
               )
             else ...[
               const SectionLabel('Recent'),

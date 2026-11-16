@@ -57,8 +57,9 @@ def test_mode_toggle_blocks_personal_calls(c):
     assert any(h["from"] == "Chidi Nwosu" for h in r.json()["held_calls"])
     # And corporate history isn't visible in personal recents.
     assert all(x["mode"] == "personal" for x in c.get("/v1/calls", headers=H(ADA)).json())
-    # Corporate commitments need corporate mode.
-    assert c.get("/v1/commitments", headers=H(ADA)).status_code == 403
+    # In Personal mode only personal commitments are listed; work ones need Work mode.
+    assert all(x["org_id"] is None for x in c.get("/v1/commitments", headers=H(ADA)).json())
+    assert c.get("/v1/commitments", headers=H(ADA), params={"scope": "team"}).status_code == 403
 
     # Re-enter corporate with the session (no PIN).
     assert c.post("/v1/presence", headers=H(ADA), json={"mode": "corporate", "corp_session": session}).status_code == 200
@@ -105,11 +106,33 @@ def test_pstn_call_extract_review_dashboard(c):
     assert {"confirmed", "nudge", "status_changed"} <= set(kinds)
 
 
-def test_personal_pstn_call_not_recorded(c):
+def test_personal_call_recorded_privately(c):
+    """Personal calls are recorded for the user's own commitments, which never reach the company."""
     c.post("/v1/presence", headers=H(TUNDE), json={"mode": "personal"})
     r = c.post("/v1/calls", headers=H(TUNDE), json={"channel": "pstn", "phone": "+2348030000000"}).json()
-    assert not r["recorded"] and r["call"]["org_id"] is None and r["call"]["processing"] == "not_applicable"
-    assert c.post(f"/dev/calls/{r['call']['id']}/simulate", headers=H(TUNDE)).status_code == 404
+    assert r["recorded"] and r["call"]["org_id"] is None and r["call"]["processing"] == "pending"
+    assert "recorded" in r["disclosure"]
+    out = c.post(f"/dev/calls/{r['call']['id']}/simulate", headers=H(TUNDE)).json()
+    assert out["commitments"] and all(x["org_id"] is None and x["user_id"] == TUNDE for x in out["commitments"])
+    # Visible in Tunde's personal list...
+    mine = c.get("/v1/commitments", headers=H(TUNDE)).json()
+    assert {x["id"] for x in out["commitments"]} <= {x["id"] for x in mine}
+    # ...and to nobody else: not his manager's team view, not by id.
+    corp_login(c, NGOZI, "EMP-1001")
+    team = c.get("/v1/commitments", headers=H(NGOZI), params={"scope": "team"}).json()
+    assert not ({x["id"] for x in out["commitments"]} & {x["id"] for x in team})
+    cid = out["commitments"][0]["id"]
+    assert c.patch(f"/v1/commitments/{cid}", headers=H(NGOZI), json={"status": "fulfilled"}).status_code == 404
+    # Tunde can manage his own.
+    assert c.patch(f"/v1/commitments/{cid}", headers=H(TUNDE), json={"status": "fulfilled"}).status_code == 200
+
+
+def test_personal_recording_can_be_switched_off(c):
+    c.post("/v1/presence", headers=H(TUNDE), json={"mode": "personal"})
+    assert c.patch("/v1/me/settings", headers=H(TUNDE), json={"record_personal_calls": False}).json() == {"record_personal_calls": False}
+    r = c.post("/v1/calls", headers=H(TUNDE), json={"channel": "pstn", "phone": "+2348030000000"}).json()
+    assert not r["recorded"] and r["call"]["processing"] == "not_applicable" and r["disclosure"] is None
+    c.patch("/v1/me/settings", headers=H(TUNDE), json={"record_personal_calls": True})
 
 
 @pytest.mark.asyncio

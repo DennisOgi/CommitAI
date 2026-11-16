@@ -149,6 +149,19 @@ async def active_membership(user_id: str) -> dict | None:
     return await db.get("memberships", id=p["membership_id"])
 
 
+PERSONAL_DISCLOSURE = "This call is recorded so we can keep track of what we agree."
+
+
+async def records_personal(user_id: str) -> bool:
+    """Whether this user records their personal calls (for their own commitments). Default on."""
+    prof = await db.get("profiles", id=user_id)
+    return bool((prof or {}).get("record_personal_calls", True))
+
+
+def is_recorded(call: dict) -> bool:
+    return call.get("processing", "not_applicable") != "not_applicable"
+
+
 async def require_membership(user_id: str) -> dict:
     m = await active_membership(user_id)
     if not m:
@@ -221,6 +234,19 @@ async def me(user_id: str = CurrentUser):
         "membership": _public_member(membership) if membership else None,
         "organization": org,
     }
+
+
+class SettingsBody(BaseModel):
+    record_personal_calls: bool | None = None
+
+
+@app.patch("/v1/me/settings")
+async def update_settings(body: SettingsBody, user_id: str = CurrentUser):
+    patch = body.model_dump(exclude_none=True)
+    if patch:
+        await db.update("profiles", patch, id=user_id)
+    prof = await db.get("profiles", id=user_id) or {}
+    return {"record_personal_calls": prof.get("record_personal_calls", True)}
 
 
 def _public_member(m: dict) -> dict:
@@ -340,6 +366,65 @@ async def add_contact(body: ContactBody, user_id: str = CurrentUser):
     return (await db.insert("contacts", row))[0]
 
 
+class PhoneContact(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    phones: list[str] = Field(default_factory=list, max_length=10)
+    emails: list[str] = Field(default_factory=list, max_length=10)
+
+
+class ContactImport(BaseModel):
+    contacts: list[PhoneContact] = Field(max_length=5000)
+    default_region: str = Field(default="NG", min_length=2, max_length=2)   # for local numbers like 0803…
+
+
+def _e164(raw: str, region: str) -> tuple[str, bool] | None:
+    """(E.164, is_mobile) for a dialable number, else None."""
+    try:
+        n = phonenumbers.parse(raw, region.upper())
+    except phonenumbers.NumberParseException:
+        return None
+    if not phonenumbers.is_possible_number(n):
+        return None
+    kind = phonenumbers.number_type(n)
+    return (phonenumbers.format_number(n, phonenumbers.PhoneNumberFormat.E164),
+            kind in (PhoneNumberType.MOBILE, PhoneNumberType.FIXED_LINE_OR_MOBILE))
+
+
+@app.post("/v1/contacts/import")
+async def import_contacts(body: ContactImport, user_id: str = CurrentUser):
+    """The user's phone address book, imported into their PERSONAL contacts (never the company's).
+    Numbers are normalised to E.164, duplicates skipped, and anyone with a Commit AI account
+    (matched by email) is linked so they can be app-called."""
+    existing = await db.select("contacts", owner_id=user_id, org_id=None)
+    have_phones = {c["phone_e164"] for c in existing if c.get("phone_e164")}
+    have_users = {c["app_user_id"] for c in existing if c.get("app_user_id")}
+    emails = {e.strip().lower() for pc in body.contacts for e in pc.emails if "@" in e}
+    users = {}
+    if emails:
+        for prof in await db.select("profiles", in_={"email": sorted(emails)[:5000]}):
+            if prof["id"] != user_id:
+                users[prof["email"]] = prof["id"]
+    rows, skipped, on_app = [], 0, 0
+    for pc in body.contacts:
+        numbers = [x for x in (_e164(p, body.default_region) for p in pc.phones) if x]
+        numbers.sort(key=lambda x: not x[1])            # prefer a mobile number
+        phone = numbers[0][0] if numbers else None
+        app_user = next((users[e.strip().lower()] for e in pc.emails if e.strip().lower() in users), None)
+        if (phone and phone in have_phones) or (not phone and not app_user) or (app_user and app_user in have_users):
+            skipped += 1
+            continue
+        rows.append({"name": pc.name.strip(), "company": None, "phone_e164": phone, "is_client": False,
+                     "owner_id": user_id, "org_id": None, "app_user_id": app_user, "source": "phone"})
+        if phone:
+            have_phones.add(phone)
+        if app_user:
+            have_users.add(app_user)
+            on_app += 1
+    for i in range(0, len(rows), 500):
+        await db.insert("contacts", rows[i:i + 500])
+    return {"imported": len(rows), "skipped": skipped, "on_app": on_app}
+
+
 # ============================================================== calls ======
 def channel_for(phone: str) -> str:
     """GSM (mobile) or landline, for any country, from libphonenumber's numbering plans."""
@@ -391,7 +476,11 @@ async def start_call(body: OutboundCall, user_id: str = CurrentUser):
     caller_mode = Mode(presence["mode"])
     member = await active_membership(user_id)
     org = await org_of(member)
-    record = should_record_outbound(caller_mode)
+    corp_record = should_record_outbound(caller_mode)
+    # Personal calls are recorded too (unless the user switched it off); their commitments
+    # stay private to the user and never reach the company.
+    personal_record = not corp_record and await records_personal(user_id)
+    record = corp_record or personal_record
     contact = await contact_visible(user_id, body.contact_id) if body.contact_id else None
     caller_name = await name_of(user_id)
 
@@ -415,14 +504,12 @@ async def start_call(body: OutboundCall, user_id: str = CurrentUser):
             raise HTTPException(422, "you can't call yourself")
         phone, channel, counterpart = None, "app", await name_of(callee)
 
-    # The room must be recordable if either side is on duty (e.g. a client calling an employee in Work mode).
-    room_record = record
-    if body.channel == "app" and not record:
-        room_record = (await presence_of((body.callee_user_id or (contact or {}).get("app_user_id"))))["mode"] == "corporate"
-    room = await daily.create_room(dialout=body.channel == "pstn", record=room_record)
+    # App calls: the callee may record even if the caller doesn't, so allow recording in the room
+    # (the bot only starts a recording when someone on the call records).
+    room = await daily.create_room(dialout=body.channel == "pstn", record=record or body.channel == "app")
     base = {
-        "mode": caller_mode.value, "org_id": org["id"] if record else None,
-        "membership_id": member["id"] if record else None, "channel": channel,
+        "mode": caller_mode.value, "org_id": org["id"] if corp_record else None,
+        "membership_id": member["id"] if corp_record else None, "channel": channel,
         "daily_room": room.name, "daily_room_url": room.url, "started_at": now_iso(),
         "processing": "pending" if record else "not_applicable",
     }
@@ -436,7 +523,8 @@ async def start_call(body: OutboundCall, user_id: str = CurrentUser):
     result: dict = {"call": caller_call, "room_url": room.url,
                     "token": await daily.token(room.name, user_id=user_id, user_name=caller_name),
                     "recorded": record, "decision": "ring",
-                    "disclosure": org["recording_disclosure"] if record and org else None}
+                    "disclosure": (org["recording_disclosure"] if corp_record and org
+                                   else PERSONAL_DISCLOSURE if personal_record else None)}
 
     if body.channel == "app":
         callee_id = caller_call["counterpart_user_id"]
@@ -446,11 +534,13 @@ async def start_call(body: OutboundCall, user_id: str = CurrentUser):
             await db.update("calls", {"status": decision.value, "ended_at": now_iso(),
                                       "processing": "not_applicable"}, id=caller_call["id"])
             result["call"]["status"] = decision.value
+            result["call"]["processing"] = "not_applicable"
+            result["recorded"], result["disclosure"] = False, None   # no conversation happens
             result["message"] = (f"{counterpart} is at work right now. We'll let them know you called."
                                  if decision is Decision.blocked_mode else
                                  f"{counterpart} is off duty. Your call has been logged for their team.")
             return result
-        if callee_call and callee_call["mode"] == "corporate":
+        if callee_call and is_recorded(callee_call):
             employees.append({"user_id": callee_id, "call_id": callee_call["id"]})
 
     if settings.bots_enabled and daily.enabled and (employees or body.channel == "pstn"):
@@ -463,7 +553,11 @@ async def start_call(body: OutboundCall, user_id: str = CurrentUser):
             "record": bool(employees), "employees": employees,
             "dialout": {"phoneNumber": phone, **({"callerId": settings.daily_caller_id} if settings.daily_caller_id else {})}
                        if body.channel == "pstn" else None,
-            "disclosure": (org_for_bot or {}).get("recording_disclosure") if employees and (org_for_bot or {}).get("announce_recording", True) else None,
+            # Anyone recording means both sides hear the notice: the company's wording on work
+            # calls, a neutral one on personal calls.
+            "disclosure": (None if not employees
+                           else (org_for_bot["recording_disclosure"] if org_for_bot.get("announce_recording", True) else None)
+                           if org_for_bot else PERSONAL_DISCLOSURE),
             "timezone": (org_for_bot or {}).get("timezone", "Africa/Lagos"),
             "employee_name": caller_name, "client_name": counterpart,
         })
@@ -492,11 +586,14 @@ async def _ring_app_user(callee_id, caller_call, caller_name, caller_id, caller_
         off_duty_policy=(off_duty_org or {}).get("off_duty_policy", "voicemail"),
     )
     routing = route_inbound(ctx)
-    callee_record = routing.record and callee_member is not None
+    corp_record = routing.record and callee_member is not None
+    personal_record = (not corp_record and routing.decision is Decision.ring
+                       and await records_personal(callee_id))
+    callee_record = corp_record or personal_record
     callee_call = (await db.insert("calls", {
-        "mode": "corporate" if callee_record else "personal",
-        "org_id": callee_member["org_id"] if callee_record else None,
-        "membership_id": callee_member["id"] if callee_record else None,
+        "mode": "corporate" if corp_record else "personal",
+        "org_id": callee_member["org_id"] if corp_record else None,
+        "membership_id": callee_member["id"] if corp_record else None,
         "user_id": callee_id, "direction": "inbound", "channel": "app",
         "counterpart_name": caller_name, "counterpart_user_id": caller_id,
         "daily_room": caller_call["daily_room"], "daily_room_url": room_url, "started_at": now_iso(),
@@ -520,7 +617,7 @@ async def incoming_calls(user_id: str = CurrentUser):
     rows = await db.select("calls", user_id=user_id, status="ringing", direction="inbound",
                            order="started_at", desc=True, limit=5)
     return [{"call_id": r["id"], "caller_name": r.get("counterpart_name") or "Caller", "mode": r["mode"],
-             "recorded": r["mode"] == "corporate", "room_url": r.get("daily_room_url")}
+             "recorded": is_recorded(r), "room_url": r.get("daily_room_url")}
             for r in rows if (parse_dt(r.get("started_at")) or utcnow()) >= cutoff]
 
 
@@ -537,10 +634,11 @@ async def accept_call(call_id: str, user_id: str = CurrentUser):
             await db.update("calls", {"status": "active", "answered_at": now}, id=c["id"])
     member = await active_membership(user_id)
     org = await org_of(member) if call["mode"] == "corporate" else None
+    recorded = is_recorded(call)
     return {"room_url": call.get("daily_room_url") or f"https://demo.daily.co/{call['daily_room']}",
             "token": await daily.token(call["daily_room"], user_id=user_id, user_name=await name_of(user_id)),
-            "recorded": call["mode"] == "corporate",
-            "disclosure": org["recording_disclosure"] if org else None}
+            "recorded": recorded,
+            "disclosure": (org["recording_disclosure"] if org else PERSONAL_DISCLOSURE) if recorded else None}
 
 
 @app.post("/v1/calls/{call_id}/decline")
@@ -580,7 +678,7 @@ async def list_calls(user_id: str = CurrentUser, limit: int = Query(50, ge=1, le
             seen.add(r["id"])
             out.append(r)
     for r in out:
-        r["commitment_count"] = len(await db.select("commitments", call_id=r["id"])) if r["mode"] == "corporate" else 0
+        r["commitment_count"] = len(await db.select("commitments", call_id=r["id"])) if is_recorded(r) else 0
     return out
 
 
@@ -590,7 +688,7 @@ async def call_detail(call_id: str, user_id: str = CurrentUser):
     if not call or not await can_view_call(user_id, call):
         raise HTTPException(404, "call not found")
     detail = {"call": call, "transcript": [], "commitments": []}
-    if call["mode"] == "corporate":
+    if is_recorded(call):
         detail["transcript"] = await db.select("transcript_segments", call_id=call_id, order="offset_ms")
         detail["commitments"] = await db.select("commitments", call_id=call_id, order="created_at")
     return detail
@@ -599,7 +697,7 @@ async def call_detail(call_id: str, user_id: str = CurrentUser):
 @app.get("/v1/calls/{call_id}/recording")
 async def call_recording(call_id: str, user_id: str = CurrentUser):
     call = await db.get("calls", id=call_id)
-    if not call or call["mode"] != "corporate" or not await can_view_call(user_id, call):
+    if not call or not is_recorded(call) or not await can_view_call(user_id, call):
         raise HTTPException(404, "call not found")
     rid = await daily.recording_for_room(call.get("daily_room")) or call.get("recording_id")
     if rid and rid != call.get("recording_id"):
@@ -645,7 +743,7 @@ class FlagBody(BaseModel):
 async def flag_moment(call_id: str, body: FlagBody, user_id: str = CurrentUser):
     """The employee tapped "Flag commitment" during a work call. Extraction looks hardest there."""
     call = await db.get("calls", id=call_id)
-    if not call or call["user_id"] != user_id or call["mode"] != "corporate":
+    if not call or call["user_id"] != user_id or not is_recorded(call):
         raise HTTPException(404, "call not found")
     flags = list(call.get("flags") or [])
     if len(flags) < 50:
@@ -665,7 +763,7 @@ class ReviewBody(BaseModel):
 @app.post("/v1/calls/{call_id}/review")
 async def review_call(call_id: str, body: ReviewBody, user_id: str = CurrentUser):
     call = await db.get("calls", id=call_id)
-    if not call or call["user_id"] != user_id or call["mode"] != "corporate":
+    if not call or call["user_id"] != user_id or not is_recorded(call):
         raise HTTPException(404, "call not found")
     for cid in body.accept:
         patch = {"status": "open", "confirmed_by_employee": True}
@@ -814,10 +912,10 @@ async def bot_complete(call_id: str, body: BotComplete):
 
 async def process_transcript(call_id: str, segments: list[Segment], voicemail: bool = False) -> dict:
     call = await db.get("calls", id=call_id)
-    if not call or call["mode"] != "corporate":
-        raise HTTPException(404, "corporate call not found")
+    if not call or not is_recorded(call):
+        raise HTTPException(404, "recorded call not found")
     await db.update("calls", {"processing": "processing"}, id=call_id)
-    org = await db.get("organizations", id=call["org_id"])
+    org = (await db.get("organizations", id=call["org_id"]) if call.get("org_id") else None) or {}
     segments = merge_fragments(segments)   # re-join sentences split by live speech-to-text
     await db.delete("transcript_segments", call_id=call_id)
     if segments:
@@ -868,7 +966,9 @@ async def process_transcript(call_id: str, segments: list[Segment], voicemail: b
 async def _new_commitment(call: dict, *, title: str, status: str, confirmed: bool = False, **kw) -> dict:
     contact = await db.get("contacts", id=call["contact_id"]) if call.get("contact_id") else None
     row = {
-        "org_id": call["org_id"], "call_id": call["id"], "membership_id": call["membership_id"],
+        # Personal calls: no org / membership; the commitment belongs to the user alone.
+        "org_id": call.get("org_id"), "call_id": call["id"], "membership_id": call.get("membership_id"),
+        "user_id": call["user_id"],
         "contact_id": call.get("contact_id"), "client_name": (contact or {}).get("company") or call.get("counterpart_name"),
         "title": title, "status": status, "confirmed_by_employee": confirmed,
         "owner": kw.pop("owner", "employee"), **{k: v for k, v in kw.items() if v is not None},
@@ -882,10 +982,38 @@ async def _event(commitment_id: str, actor: str | None, kind: str, payload: dict
 
 
 # ========================================================= commitments =====
+async def commitment_for(user_id: str, cid: str) -> tuple[dict, dict | None]:
+    """The commitment if this user may see it: their own personal one, or a work one in their
+    visible team (in Work mode). Returns (row, membership-or-None)."""
+    row = await db.get("commitments", id=cid)
+    if row and row.get("org_id") is None:
+        if row.get("user_id") == user_id:
+            return row, None
+        raise HTTPException(404)
+    m = await require_membership(user_id)
+    if not row or row["membership_id"] not in await visible_member_ids(m):
+        raise HTTPException(404)
+    return row, m
+
+
 @app.get("/v1/commitments")
 async def list_commitments(user_id: str = CurrentUser, scope: Literal["mine", "team"] = "mine",
                            status: str | None = None, member_id: str | None = None):
-    m = await require_membership(user_id)
+    m = await active_membership(user_id)
+    if m is None:
+        # Personal mode: the user's own commitments from personal calls (never a team view).
+        if scope == "team":
+            raise HTTPException(403, "switch to corporate mode first")
+        rows = [r for r in await db.select("commitments", user_id=user_id) if r.get("org_id") is None]
+        if status:
+            rows = [r for r in rows if r["status"] in set(status.split(","))]
+        me_name = await name_of(user_id)
+        for r in rows:
+            r["employee_name"] = me_name
+        far = utcnow() + timedelta(days=3650)
+        rank = {"pending_review": 0, "missed": 1, "open": 2, "in_progress": 2, "disputed": 3, "fulfilled": 5, "cancelled": 6}
+        rows.sort(key=lambda r: (rank.get(r["status"], 4), parse_dt(r.get("due_at")) or far))
+        return rows
     if scope == "mine":
         ids = {m["id"]}
     else:
@@ -914,10 +1042,7 @@ class CommitmentPatch(BaseModel):
 
 @app.patch("/v1/commitments/{cid}")
 async def update_commitment(cid: str, body: CommitmentPatch, user_id: str = CurrentUser):
-    m = await require_membership(user_id)
-    row = await db.get("commitments", id=cid)
-    if not row or row["membership_id"] not in await visible_member_ids(m):
-        raise HTTPException(404)
+    row, _m = await commitment_for(user_id, cid)
     patch = body.model_dump(exclude_none=True, exclude={"note"})
     if body.due_at:
         patch["due_at"] = valid_iso(body.due_at)
@@ -938,10 +1063,7 @@ class CommentBody(BaseModel):
 
 @app.post("/v1/commitments/{cid}/comments")
 async def comment(cid: str, body: CommentBody, user_id: str = CurrentUser):
-    m = await require_membership(user_id)
-    row = await db.get("commitments", id=cid)
-    if not row or row["membership_id"] not in await visible_member_ids(m):
-        raise HTTPException(404)
+    await commitment_for(user_id, cid)
     await _event(cid, user_id, "comment", {"text": body.text, "author": await name_of(user_id)})
     return {"ok": True}
 
@@ -963,10 +1085,7 @@ async def nudge(cid: str, user_id: str = CurrentUser):
 
 @app.get("/v1/commitments/{cid}/events")
 async def commitment_events(cid: str, user_id: str = CurrentUser):
-    m = await require_membership(user_id)
-    row = await db.get("commitments", id=cid)
-    if not row or row["membership_id"] not in await visible_member_ids(m):
-        raise HTTPException(404)
+    await commitment_for(user_id, cid)
     events = await db.select("commitment_events", commitment_id=cid, order="created_at")
     for e in events:
         e["actor_name"] = await name_of(e.get("actor_id")) if e.get("actor_id") else "Commit AI"

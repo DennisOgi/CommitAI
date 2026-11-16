@@ -4,6 +4,8 @@
 	<dict>
 		<key>NSMicrophoneUsageDescription</key>
 		<string>Commit AI uses the microphone for your calls.</string>
+		<key>NSContactsUsageDescription</key>
+		<string>Import your contacts so you can call them and see who is on Commit AI. Your contacts stay private to you.</string>
 		<key>NSFaceIDUsageDescription</key>
 		<string>Confirm it's you before switching to Work mode.</string>
 		<key>UIBackgroundModes</key>

@@ -13,6 +13,7 @@ import '../data/api_backend.dart';
 import '../data/backend.dart';
 import '../data/demo_backend.dart';
 import '../models/models.dart';
+import '../services/reminder_service.dart';
 
 enum AuthStatus { loading, signedOut, offline, onboarding, ready }
 
@@ -219,6 +220,7 @@ class AppState extends ChangeNotifier {
     await _incomingSub?.cancel();
     _incomingSub = b.incoming.stream.listen((call) => incoming.value = call);
     _startRingPolling(b);
+    unawaited(syncReminders());
     status = b is DemoBackend || _onboarded ? AuthStatus.ready : AuthStatus.onboarding;
     notifyListeners();
   }
@@ -242,6 +244,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> signOut() async {
     if (corporate) await backend?.setMode(AppMode.personal).catchError((_) => <HeldCall>[]);
+    await ReminderService.instance.clear();
     _ringPoll?.cancel();
     await _prefs?.remove('demo_persona');
     await _prefs?.remove('dev_user');
@@ -260,6 +263,32 @@ class AppState extends ChangeNotifier {
   void refresh() {
     dataVersion++;
     notifyListeners();
+    unawaited(syncReminders());
+  }
+
+  /// Re-schedule on-device deadline reminders for this mode's own commitments.
+  Future<void> syncReminders() async {
+    final b = backend;
+    if (b == null || b is DemoBackend || !ReminderService.supported) return;
+    try {
+      await ReminderService.instance.sync(mode, await b.commitments());
+    } catch (_) {
+      // Offline: keep the reminders already scheduled.
+    }
+  }
+
+  bool get recordsPersonalCalls => session?.profile.recordPersonalCalls ?? true;
+
+  /// The "Record my personal calls" switch.
+  Future<String?> setRecordPersonalCalls(bool on) async {
+    try {
+      final saved = await backend!.setRecordPersonalCalls(on);
+      session?.profile.recordPersonalCalls = saved;
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return e.toString();
+    }
   }
 
   /// The mode toggle. Entering Work mode needs a corporate session; within its
@@ -277,6 +306,7 @@ class AppState extends ChangeNotifier {
     try {
       final held = await backend!.setMode(target, corpSession: _corpSession);
       session = await backend!.me();
+      unawaited(syncReminders()); // the new mode has its own commitments
       return Switched(held);
     } on ApiException catch (e) {
       if (e.status == 401) {

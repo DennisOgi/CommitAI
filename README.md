@@ -8,8 +8,10 @@ call ("I'll send the revised invoice tomorrow morning"), turns it into a tracked
 deadline and the exact words that were said, and puts it on a dashboard so managers can see what is due,
 what slipped, and who to follow up with.
 
-One phone, two identities. **Personal** mode is a private phone: nothing is recorded or shared.
-**Work** mode is entered with a company login. While it's on, personal calls are held, not rung.
+One phone, two identities. In **Personal** mode calls are recorded only for the user's own
+commitments, which stay private to them (they can switch this off). **Work** mode is entered with a
+company login; work calls and their commitments are shared with the employee's managers. While Work
+mode is on, personal calls are held, not rung.
 
 ---
 
@@ -61,7 +63,17 @@ One phone, two identities. **Personal** mode is a private phone: nothing is reco
   was actually said.
 - **Both sides tracked.** What the *client* promised ("I'll send the PO") is tracked as "client owes us"
   and never counts against the employee.
-- **Reminders** before deadlines; the employee's own reliability score.
+- **Personal calls tracked too, privately.** Personal calls are recorded and their commitments extracted
+  for the user alone: they appear on the Commitments tab in Personal mode and never reach the company,
+  managers or colleagues (enforced by the database). A **Record my personal calls** switch turns it off.
+- **Deadline reminders on the phone:** a day before and 2 hours before every dated commitment, scheduled
+  on the device so they arrive even when the app is closed and without push set up; plus a "deadline
+  passed" notice. (With push configured, the server sends the same reminders by push too.)
+- **Import phone contacts** (Personal mode): with permission, the phone's address book is imported into
+  the user's private contacts; numbers are normalised (`0803…` → `+234803…`), duplicates skipped, and
+  contacts who use Commit AI are marked for free app calls. In Work mode, a client can be picked from the
+  phone's contacts.
+- The employee's own reliability score.
 - **"While you were at work" digest.** Switching back to Personal shows who tried to reach you.
 - **Biometric re-entry.** A Work session lasts 12 hours; within it, switching back to Work takes a
   fingerprint / Face ID instead of the PIN.
@@ -147,8 +159,8 @@ flowchart LR
 
 | Call | How it connects | Recorded / extracted |
 |---|---|---|
-| **App → app** (internet) | Both phones join the same Daily room. The callee is rung by push, or (without push) by the app polling `GET /v1/calls/incoming` every 3 s while open. | Only if the employee side is in Work mode |
-| **App → GSM mobile / landline** | The bot asks Daily to dial out from the room (`start_dialout`) with the company number as caller ID. | Only in Work mode |
+| **App → app** (internet) | Both phones join the same Daily room. The callee is rung by push, or (without push) by the app polling `GET /v1/calls/incoming` every 3 s while open. | Each side separately: Work mode → company commitments; Personal mode → private commitments (unless switched off) |
+| **App → GSM mobile / landline** | The bot asks Daily to dial out from the room (`start_dialout`) with the company number as caller ID. | Work → company; Personal → private (unless switched off) |
 | **GSM / landline → work number** | Daily pinless dial-in calls `POST /webhooks/daily/dialin` (HMAC-signed). The server finds the employee who owns the number and either rings them or sends the caller to AI voicemail. | Yes (it's a corporate number) |
 
 Numbers are validated and classified (mobile vs landline) with libphonenumber, for any country.
@@ -159,13 +171,15 @@ Implemented as a pure function in `server/commitai/routing.py`:
 
 | Callee is in | Incoming call is | Result | Recorded |
 |---|---|---|---|
-| Work | corporate (work call, corporate number, or a listed client) | rings | yes |
+| Work | corporate (work call, corporate number, or a listed client) | rings | yes, for the company |
 | Work | personal (friend, family) | **held**: the caller is told they're at work; shown later in the digest | no |
-| Personal | personal | rings | no |
+| Personal | personal | rings | yes, privately for the user (unless switched off) |
 | Personal | corporate | company policy: `voicemail` (default) or `ring` | voicemail is transcribed |
 
-Outbound calls are recorded only if the caller is in Work mode. Personal and Work histories, contacts
-and recents never mix. For an app-to-app **work** test, both people must be in Work mode.
+Work-mode recordings produce company commitments (visible to managers); Personal-mode recordings produce
+private commitments (owner only, `org_id` is null). Whenever anyone on the call records, the bot tells
+both sides the call is recorded. Personal and Work histories, contacts, commitments and recents never mix.
+For an app-to-app **work** test, both people must be in Work mode.
 
 ### How commitments are extracted
 
@@ -195,10 +209,14 @@ confident items left unreviewed for 24 hours.
 
 ### Accountability loop
 
-The scheduler (in the API process) runs every 15 s for call housekeeping and every
+**On the phone:** the app schedules local notifications for the user's own live commitments a day before
+and 2 hours before each deadline (re-synced whenever data changes or the mode switches). These work with
+the app closed and need no push setup.
+
+**On the server**, the scheduler (in the API process) runs every 15 s for call housekeeping and every
 `SCHEDULER_INTERVAL_S` (5 min) for the rest:
-- reminders `REMINDER_LEAD_HOURS` before a deadline;
-- overdue items marked **missed** and escalated to the manager;
+- push reminders `REMINDER_LEAD_HOURS` (24 h) and 2 h before a deadline (work and personal commitments);
+- overdue items marked **missed**; the owner is told and, for work commitments, the manager is alerted;
 - unreviewed confident findings auto-published after 24 h;
 - unanswered calls expired after `RING_TIMEOUT_S`;
 - calls whose transcript never arrived marked failed after 15 min;
@@ -211,8 +229,8 @@ The scheduler (in the API process) runs every 15 s for call housekeeping and eve
 - **Work identity:** company code + employee ID + PIN (bcrypt). PIN attempts are rate-limited per user
   and per IP. A successful login mints a 12-hour corporate session stored in the phone's keystore
   (`flutter_secure_storage`); re-entry within it needs biometrics and falls back to the PIN.
-- **Database:** Row-Level Security on every table. Personal calls cannot have an organisation or a
-  recording (CHECK constraints). Colleagues can't see each other's calls; managers see their reports;
+- **Database:** Row-Level Security on every table. Personal calls can never belong to an organisation,
+  and personal commitments are visible to their owner only (CHECK constraints + RLS). Colleagues can't see each other's calls; managers see their reports;
   admins see the company. App users can't read PIN hashes or other users' emails, and can't change
   their own Work/Personal state (only the API can). RLS helper functions live in a private schema.
 - **Server:** with `APP_ENV=production` the API refuses to start with unsafe settings (dev login on,
@@ -443,13 +461,15 @@ All `/v1` endpoints take `Authorization: Bearer <Supabase access token>`.
 | `POST /v1/presence` | switch Personal / Work |
 | `POST /v1/devices` | register a push token |
 | `GET/POST /v1/contacts` | contacts (Personal) or company clients (Work); add by phone and/or email |
+| `POST /v1/contacts/import` | import the phone's address book into personal contacts |
+| `PATCH /v1/me/settings` | e.g. `record_personal_calls` |
 | `POST /v1/calls` | start a call (`channel: app` or `pstn`) → room URL + token |
 | `GET /v1/calls/incoming` | calls ringing for me (polled when push is off) |
 | `POST /v1/calls/{id}/accept`, `/decline`, `/end` | call control |
 | `POST /v1/calls/{id}/flags` | "flag commitment" moment |
 | `GET /v1/calls`, `GET /v1/calls/{id}`, `GET /v1/calls/{id}/recording` | history, transcript + commitments, recording link |
 | `POST /v1/calls/{id}/review` | confirm / edit / reject / add commitments |
-| `GET /v1/commitments` | mine or team (`scope=team`), filters |
+| `GET /v1/commitments` | Personal mode: my private commitments; Work mode: mine or team (`scope=team`), filters |
 | `PATCH /v1/commitments/{id}`, `POST …/comments`, `POST …/nudge`, `GET …/events` | update, comment, nudge, audit trail |
 | `GET /v1/dashboard?days=30` | manager overview |
 | `POST /v1/diagnostics` | client-side failure report (goes to the server log) |
@@ -528,7 +548,8 @@ dart run flutter_native_splash:create
 
 **Working and verified:** sign-up / sign-in / onboarding against Supabase; Personal / Work modes and
 routing; app-to-app call setup; recording, per-speaker transcription and Gemini extraction on real Daily
-rooms; review, dashboard and all-staff register; 48 server tests and the Flutter test suite.
+rooms; review, dashboard and all-staff register; private personal-call commitments, contact import and
+two-stage deadline reminders; 51 server tests and the Flutter test suite.
 
 **Known limits**
 - Incoming calls only ring while the app is open until push (FCM / PushKit) is configured.
@@ -542,5 +563,5 @@ rooms; review, dashboard and all-staff register; 48 server tests and the Flutter
   replicas.
 
 **Roadmap:** simpler Work sign-in (company recognised from the work email, PIN only, invite links);
-importing phone contacts with "who's on Commit AI" matching; Nigerian numbers over SIP; push
+matching imported contacts by verified phone number (today by email); Nigerian numbers over SIP; push
 notifications; production deployment on a stable domain.

@@ -23,11 +23,15 @@ T _enum<T extends Enum>(List<T> values, dynamic raw, T fallback) {
 String enumWire(Enum e) => _snake(e.name);
 
 class Profile {
-  Profile({required this.id, required this.fullName});
+  Profile({required this.id, required this.fullName, this.recordPersonalCalls = true});
   final String id;
   final String fullName;
 
-  factory Profile.fromJson(Map<String, dynamic> j) => Profile(id: j['id'], fullName: j['full_name'] ?? '');
+  /// Personal calls are recorded for the user's own commitments (private to them) unless switched off.
+  bool recordPersonalCalls;
+
+  factory Profile.fromJson(Map<String, dynamic> j) =>
+      Profile(id: j['id'], fullName: j['full_name'] ?? '', recordPersonalCalls: j['record_personal_calls'] ?? true);
 }
 
 class Organization {

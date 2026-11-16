@@ -48,7 +48,8 @@ class _HomeShellState extends State<HomeShell> {
         _Tab('Calls', Icons.history_rounded, Icons.history_rounded, () => const RecentsScreen()),
         _Tab('Keypad', Icons.dialpad_rounded, Icons.dialpad_rounded, () => const KeypadScreen()),
         _Tab(app.corporate ? 'Clients' : 'Contacts', Icons.people_outline_rounded, Icons.people_rounded, () => const ContactsScreen()),
-        if (app.corporate) _Tab('Commitments', Icons.handshake_outlined, Icons.handshake_rounded, () => const CommitmentsScreen()),
+        // Personal mode has commitments too (from recorded personal calls, private to the user).
+        _Tab('Commitments', Icons.handshake_outlined, Icons.handshake_rounded, () => const CommitmentsScreen()),
         if (app.isManager) _Tab('Team', Icons.insights_outlined, Icons.insights_rounded, () => const DashboardScreen()),
       ];
 
@@ -151,6 +152,20 @@ class _HomeShellState extends State<HomeShell> {
             ),
           ],
           const Divider(),
+          StatefulBuilder(
+            builder: (context, setSheet) => SwitchListTile(
+              secondary: const Icon(Icons.fiber_manual_record_rounded),
+              title: const Text('Record my personal calls'),
+              subtitle: const Text('For your own commitments and reminders. Never shared with your company.'),
+              value: app.recordsPersonalCalls,
+              onChanged: (v) async {
+                final err = await app.setRecordPersonalCalls(v);
+                setSheet(() {});
+                if (err != null && context.mounted) toast(context, err, icon: Icons.error_outline_rounded);
+              },
+            ),
+          ),
+          const Divider(),
           ListTile(
             leading: const Icon(Icons.logout_rounded, color: AppColors.danger),
             title: const Text('Sign out', style: TextStyle(color: AppColors.danger)),
@@ -235,11 +250,11 @@ class _HomeShellState extends State<HomeShell> {
                                       style: const TextStyle(fontSize: 12.5, color: AppColors.textDim, fontWeight: FontWeight.w600)),
                                 ),
                               ])
-                            : const Text('Private · nothing recorded',
-                                key: ValueKey('personal'),
+                            : Text(app.recordsPersonalCalls ? 'Recorded for you only · private' : 'Private · not recorded',
+                                key: const ValueKey('personal'),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 12.5, color: AppColors.textDim, fontWeight: FontWeight.w600)),
+                                style: const TextStyle(fontSize: 12.5, color: AppColors.textDim, fontWeight: FontWeight.w600)),
                       ),
                     ),
                   ]),

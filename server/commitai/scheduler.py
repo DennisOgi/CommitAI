@@ -34,29 +34,41 @@ async def tick(db: Store, now: datetime | None = None) -> dict:
     members = {m["id"]: m for m in await db.select("memberships")}
 
     for c in await db.select("commitments", in_={"status": ["open", "in_progress"]}):
-        due, member = _dt(c.get("due_at")), members.get(c["membership_id"])
-        if not due or not member:
+        if c.get("owner") == "client":
+            continue   # the client's promise: nothing for our user to be reminded to do
+        due = _dt(c.get("due_at"))
+        member = members.get(c.get("membership_id"))
+        # Work commitments belong to the member's user; personal ones to their user directly.
+        owner_user = (member or {}).get("user_id") or c.get("user_id")
+        if not due or not owner_user:
             continue
+        what = f"{c['title']}" + (f" — {c['client_name']}" if c.get("client_name") else "")
         if due < now - timedelta(hours=1):
             await db.update("commitments", {"status": "missed"}, id=c["id"])
             await db.insert("commitment_events", {"commitment_id": c["id"], "actor_id": None, "kind": "escalated",
                                                   "payload": {"reason": "deadline passed"}, "created_at": now_iso()})
             stats["missed"] += 1
-            manager = members.get(member.get("manager_id"))
+            await pusher.send(await _tokens(db, owner_user), data={"type": "commitment", "commitment_id": c["id"]},
+                              title="Deadline passed", body=what)
+            manager = members.get((member or {}).get("manager_id"))
             if manager and manager.get("user_id"):
                 await pusher.send(await _tokens(db, manager["user_id"]),
                                   data={"type": "commitment", "commitment_id": c["id"]},
                                   title="Commitment missed",
                                   body=f"“{c['title']}” for {c.get('client_name') or 'a client'} is overdue.")
-        elif due < now + timedelta(hours=settings.reminder_lead_hours):
-            events = await db.select("commitment_events", commitment_id=c["id"], kind="reminder")
-            if not events and member.get("user_id"):
-                await pusher.send(await _tokens(db, member["user_id"]),
-                                  data={"type": "commitment", "commitment_id": c["id"]},
-                                  title="Due soon", body=f"{c['title']} — {c.get('client_name') or ''}".strip(" —"))
+            continue
+        # Two reminders per deadline: a day before (REMINDER_LEAD_HOURS) and 2 hours before.
+        sent = {(e.get("payload") or {}).get("stage", "day")
+                for e in await db.select("commitment_events", commitment_id=c["id"], kind="reminder")}
+        for stage, lead, title in (("soon", timedelta(hours=2), "Due in 2 hours"),
+                                   ("day", timedelta(hours=settings.reminder_lead_hours), "Due soon")):
+            if due < now + lead and stage not in sent:
+                await pusher.send(await _tokens(db, owner_user), data={"type": "commitment", "commitment_id": c["id"]},
+                                  title=title, body=what)
                 await db.insert("commitment_events", {"commitment_id": c["id"], "actor_id": None, "kind": "reminder",
-                                                      "payload": {}, "created_at": now_iso()})
+                                                      "payload": {"stage": stage}, "created_at": now_iso()})
                 stats["reminded"] += 1
+                break   # one reminder per tick; a commitment found inside 2 h skips the day-before one
 
     for c in await db.select("commitments", status="pending_review"):
         if float(c.get("confidence", 0)) >= 0.7 and _dt(c["created_at"]) < now - timedelta(hours=24):

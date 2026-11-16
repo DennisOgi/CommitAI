@@ -52,6 +52,14 @@ abstract class Backend {
   /// The employee flagged a moment of a live work call as a commitment.
   Future<void> flagMoment(String callId, int offsetMs) async {}
 
+  /// Personal-call recording on/off. Returns the saved value.
+  Future<bool> setRecordPersonalCalls(bool on) async => on;
+
+  /// Import the phone's address book into personal contacts.
+  /// Each entry: {name, phones: [...], emails: [...]}. Returns (imported, skipped, onApp).
+  Future<({int imported, int skipped, int onApp})> importContacts(List<Map<String, dynamic>> contacts) async =>
+      (imported: 0, skipped: contacts.length, onApp: 0);
+
   /// Send a client-side failure (e.g. couldn't join the call audio) to the server log.
   Future<void> reportProblem(String where, String message, {String? callId}) async {}
 

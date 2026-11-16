@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from commitai import api
 from commitai.api import app
-from commitai.seed import ADA, BELLO, CHIDI, NGOZI
+from commitai.seed import ADA, BELLO, CHIDI, KEMI, NGOZI
 
 
 def H(uid):
@@ -153,3 +153,49 @@ async def test_stale_processing_is_marked_failed():
     assert await fail_stale_processing(db, now) == 1
     assert (await db.get("calls", id=old["id"]))["processing"] == "failed"
     assert (await db.get("calls", id=fresh["id"]))["processing"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_reminders_day_before_two_hours_before_and_personal(monkeypatch):
+    from commitai import push, scheduler
+    from commitai.store import MemoryStore
+
+    sent = []
+
+    async def fake_send(tokens, **kw):
+        sent.append(kw["title"])
+
+    monkeypatch.setattr(push.pusher, "send", fake_send)
+    monkeypatch.setattr(scheduler.pusher, "send", fake_send)
+    db = MemoryStore()
+    now = datetime.now(timezone.utc)
+    # A personal commitment (no org / membership) due in 20 hours.
+    c = (await db.insert("commitments", {"title": "Send the quote", "status": "open", "owner": "employee",
+                                         "user_id": "u1", "org_id": None, "membership_id": None,
+                                         "due_at": (now + timedelta(hours=20)).isoformat()}))[0]
+    await scheduler.tick(db, now)
+    assert sent == ["Due soon"]
+    await scheduler.tick(db, now + timedelta(hours=1))          # nothing new yet
+    assert sent == ["Due soon"]
+    await scheduler.tick(db, now + timedelta(hours=19))         # within 2 hours
+    assert sent == ["Due soon", "Due in 2 hours"]
+    await scheduler.tick(db, now + timedelta(hours=22))         # overdue: owner told too
+    assert sent[-1] == "Deadline passed" and (await db.get("commitments", id=c["id"]))["status"] == "missed"
+
+
+def test_import_phone_contacts(c):
+    c.post("/v1/presence", headers=H(KEMI), json={"mode": "personal"})
+    body = {"contacts": [
+        {"name": "Mum", "phones": ["0803 123 4567"]},                          # local number -> +234
+        {"name": "Mum again", "phones": ["+234 803 123 4567"]},                # duplicate number
+        {"name": "Chidi", "phones": [], "emails": ["chidi@example.com"]},       # Commit AI user by email
+        {"name": "Office", "phones": ["01 270 0000", "0809 999 0000"]},        # prefers the mobile
+        {"name": "Junk", "phones": ["12"]},                                     # not dialable, no email
+    ]}
+    r = c.post("/v1/contacts/import", headers=H(KEMI), json=body).json()
+    assert r["imported"] == 3 and r["skipped"] == 2 and r["on_app"] == 1
+    mine = {x["name"]: x for x in c.get("/v1/contacts", headers=H(KEMI)).json()}
+    assert mine["Mum"]["phone_e164"] == "+2348031234567" and mine["Office"]["phone_e164"] == "+2348099990000"
+    assert mine["Chidi"]["app_user_id"] == CHIDI and all(x["org_id"] is None for x in mine.values())
+    # Importing again adds nothing.
+    assert c.post("/v1/contacts/import", headers=H(KEMI), json=body).json()["imported"] == 0

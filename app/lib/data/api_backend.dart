@@ -156,6 +156,24 @@ class ApiBackend extends Backend {
       _req('POST', '/v1/devices', body: {'platform': platform, 'push_token': pushToken});
 
   @override
+  Future<bool> setRecordPersonalCalls(bool on) async =>
+      (await _req('PATCH', '/v1/me/settings', body: {'record_personal_calls': on}))['record_personal_calls'] as bool;
+
+  @override
+  Future<({int imported, int skipped, int onApp})> importContacts(List<Map<String, dynamic>> contacts) async {
+    var imported = 0, skipped = 0, onApp = 0;
+    // The server takes up to 5,000 per request; big address books go in chunks.
+    for (var i = 0; i < contacts.length; i += 2000) {
+      final chunk = contacts.sublist(i, (i + 2000).clamp(0, contacts.length));
+      final r = await _req('POST', '/v1/contacts/import', body: {'contacts': chunk, 'default_region': 'NG'});
+      imported += r['imported'] as int;
+      skipped += r['skipped'] as int;
+      onApp += r['on_app'] as int;
+    }
+    return (imported: imported, skipped: skipped, onApp: onApp);
+  }
+
+  @override
   Future<void> reportProblem(String where, String message, {String? callId}) async {
     try {
       await _req('POST', '/v1/diagnostics', body: {'where': where, 'message': message, if (callId != null) 'call_id': callId});
