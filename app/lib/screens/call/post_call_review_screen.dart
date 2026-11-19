@@ -71,7 +71,12 @@ class _PostCallReviewScreenState extends State<PostCallReviewScreen> {
     super.dispose();
   }
 
+  bool _approved = false;
+
+  bool get _work => _detail?.call.mode == AppMode.corporate;
+
   Future<void> _save() async {
+    if (_saving || _approved) return;
     setState(() => _saving = true);
     final app = AppScope.read(context);
     final accept = [for (final d in _drafts) if (d.keep) d.c.id];
@@ -83,10 +88,26 @@ class _PostCallReviewScreenState extends State<PostCallReviewScreen> {
     try {
       await app.backend!.submitReview(widget.callId, accept: accept, reject: reject, edits: edits, add: _added);
       if (!mounted) return;
+      final n = accept.length + _added.length;
+      // Show the confirmation on this screen for a moment before closing, so a second tap
+      // can't land on whatever is underneath (e.g. a call button on Recents).
+      setState(() {
+        _saving = false;
+        _approved = true;
+      });
       app.refresh();
-      Navigator.of(context).pop();
-      toast(context, '${accept.length + _added.length} commitment${accept.length + _added.length == 1 ? '' : 's'} logged and shared with your manager',
-          icon: Icons.check_circle_rounded);
+      final messenger = ScaffoldMessenger.of(context);
+      final nav = Navigator.of(context);
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      if (!mounted) return;
+      nav.pop();
+      messenger.showSnackBar(SnackBar(
+        content: Text(n == 0
+            ? 'Review saved.'
+            : _work
+                ? 'Approved · $n commitment${n == 1 ? '' : 's'} sent to your manager'
+                : 'Approved · $n commitment${n == 1 ? '' : 's'} saved with reminders'),
+      ));
     } catch (e) {
       if (mounted) {
         setState(() => _saving = false);
@@ -160,13 +181,36 @@ class _PostCallReviewScreenState extends State<PostCallReviewScreen> {
           : SafeArea(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: FilledButton.icon(
-                  onPressed: _saving ? null : _save,
-                  icon: _saving
-                      ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Theme.of(context).colorScheme.onPrimary))
-                      : const Icon(Icons.done_all_rounded),
-                  label: Text(_drafts.isEmpty && _added.isEmpty ? 'Done' : 'Confirm & share with manager'),
-                ),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  if (!_approved && (_drafts.any((x) => x.keep) || _added.isNotEmpty))
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        _work
+                            ? 'Approved commitments go to your manager and get reminders.'
+                            : 'Approved commitments stay private to you and get reminders.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 12.5, color: AppColors.textDim),
+                      ),
+                    ),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: FilledButton.icon(
+                      style: _approved ? FilledButton.styleFrom(backgroundColor: AppColors.success) : null,
+                      onPressed: _saving || _approved ? () {} : _save,
+                      icon: _saving
+                          ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Theme.of(context).colorScheme.onPrimary))
+                          : Icon(_approved ? Icons.check_circle_rounded : Icons.verified_rounded),
+                      label: Text(_approved
+                          ? 'Approved'
+                          : _drafts.isEmpty && _added.isEmpty
+                              ? 'Done'
+                              : 'Approve',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ]),
               ),
             ),
     );
@@ -232,7 +276,7 @@ class _PostCallReviewScreenState extends State<PostCallReviewScreen> {
         ),
       OutlinedButton.icon(onPressed: _addMissed, icon: const Icon(Icons.add_rounded), label: const Text('Add one Commit AI missed')),
       if (theirs.isNotEmpty) ...[
-        const SectionLabel('The client committed to', padding: EdgeInsets.fromLTRB(4, 26, 4, 10)),
+        SectionLabel('${d.call.counterpartName.split(' ').first} committed to', padding: const EdgeInsets.fromLTRB(4, 26, 4, 10)),
         for (final x in theirs) _DraftCard(draft: x, accent: AppColors.info, onToggle: () => setState(() => x.keep = !x.keep), onEdit: () => _edit(x), onDue: () => _pickDue(x)),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 4),

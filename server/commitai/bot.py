@@ -106,7 +106,7 @@ class CallBot:
             # Never linger: if the call never connects (no answer, a phone that failed to join),
             # leave instead of recording an empty room until it expires.
             asyncio.get_running_loop().call_later(CONNECT_TIMEOUT_S, lambda: asyncio.ensure_future(self._connect_timeout()))
-            if self.record:
+            if self.record and self.cfg.get("keep_audio", True):   # personal calls: no audio kept
                 stream_id, err = await transport.start_recording()
                 if not err:
                     await self._post_event("recording_started", {"stream_id": stream_id})   # server resolves the real recording id
@@ -260,7 +260,7 @@ class CallBot:
         self.finished = True
         logger.info(f"call {self.call_id} finished; {len(self.segments)} segments")
         try:
-            if self.record:
+            if self.record and self.cfg.get("keep_audio", True):
                 await self.transport.stop_recording()
             await self._post_event("ended")
             if self.record or self.voicemail_greeting:

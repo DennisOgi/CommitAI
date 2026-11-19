@@ -156,7 +156,7 @@ class _HomeShellState extends State<HomeShell> {
             builder: (context, setSheet) => SwitchListTile(
               secondary: const Icon(Icons.fiber_manual_record_rounded),
               title: const Text('Record my personal calls'),
-              subtitle: const Text('For your own commitments and reminders. Never shared with your company.'),
+              subtitle: const Text('Recorded only temporarily to find your commitments, then deleted. Never shared with your company.'),
               value: app.recordsPersonalCalls,
               onChanged: (v) async {
                 final err = await app.setRecordPersonalCalls(v);

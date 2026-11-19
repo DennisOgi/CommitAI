@@ -107,10 +107,12 @@ class _ReviewBanner extends StatelessWidget {
               const SizedBox(width: 14),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('$count commitment${count == 1 ? '' : 's'} to confirm',
+                  Text('$count commitment${count == 1 ? '' : 's'} to approve',
                       style: AppType.display(19, weight: FontWeight.w600, color: p.onAccent)),
                   const SizedBox(height: 3),
-                  Text('From $calls call${calls == 1 ? '' : 's'} · auto-shared with your manager in 24h',
+                  Text(AppScope.of(context).corporate
+                          ? 'From $calls call${calls == 1 ? '' : 's'} · tap to approve and send to your manager'
+                          : 'From $calls call${calls == 1 ? '' : 's'} · tap to approve',
                       style: TextStyle(color: p.onAccent.withValues(alpha: .75), fontSize: 12.5, fontWeight: FontWeight.w600)),
                 ]),
               ),

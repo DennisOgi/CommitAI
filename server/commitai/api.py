@@ -439,8 +439,9 @@ async def import_contacts(body: ContactImport, user_id: str = CurrentUser):
     have_users = {c["app_user_id"] for c in existing if c.get("app_user_id")}
     emails = {e.strip().lower() for pc in body.contacts for e in pc.emails if "@" in e}
     users = {}
-    if emails:
-        for prof in await db.select("profiles", in_={"email": sorted(emails)[:5000]}):
+    wanted = sorted(emails)[:5000]
+    for i in range(0, len(wanted), 80):          # small batches: the lookup goes in the URL
+        for prof in await db.select("profiles", in_={"email": wanted[i:i + 80]}):
             if prof["id"] != user_id:
                 users[prof["email"]] = prof["id"]
     rows, skipped, on_app = [], 0, 0
@@ -561,6 +562,9 @@ async def start_call(body: OutboundCall, user_id: str = CurrentUser):
     }))[0]
 
     employees = [{"user_id": user_id, "call_id": caller_call["id"]}] if record else []
+    # Audio is kept only for work calls (the company's record). Personal calls are transcribed
+    # live for their commitments and never stored as audio; their transcript is deleted after.
+    work_audio = corp_record
     result: dict = {"call": caller_call, "room_url": room.url,
                     "token": await daily.token(room.name, user_id=user_id, user_name=caller_name),
                     "recorded": record, "decision": "ring",
@@ -583,6 +587,7 @@ async def start_call(body: OutboundCall, user_id: str = CurrentUser):
             return result
         if callee_call and is_recorded(callee_call):
             employees.append({"user_id": callee_id, "call_id": callee_call["id"]})
+            work_audio = work_audio or callee_call["mode"] == "corporate"
 
     if settings.bots_enabled and daily.enabled and (employees or body.channel == "pstn"):
         org_for_bot = org
@@ -591,7 +596,7 @@ async def start_call(body: OutboundCall, user_id: str = CurrentUser):
         await bot_runner.spawn({
             "call_id": caller_call["id"], "room_url": room.url,
             "token": await daily.token(room.name, user_id="commit-ai-bot", user_name="Commit AI", owner=True),
-            "record": bool(employees), "employees": employees,
+            "record": bool(employees), "employees": employees, "keep_audio": work_audio,
             "dialout": {"phoneNumber": phone, **({"callerId": settings.daily_caller_id} if settings.daily_caller_id else {})}
                        if body.channel == "pstn" else None,
             # Anyone recording means both sides hear the notice: the company's wording on work
@@ -995,6 +1000,9 @@ async def process_transcript(call_id: str, segments: list[Segment], voicemail: b
     for old in await db.select("commitments", call_id=call_id, status="pending_review"):
         await db.delete("commitment_events", commitment_id=old["id"])
         await db.delete("commitments", id=old["id"])
+    if call["mode"] == "personal":
+        # Personal calls are only transcribed temporarily, to find the commitments.
+        await db.delete("transcript_segments", call_id=call_id)
     created = []
     for c in result.commitments:
         due_at = c.due_at

@@ -37,16 +37,25 @@ class _InCallScreenState extends State<InCallScreen> with SingleTickerProviderSt
     final flagged = List<String>.of(calls.flagged);
     final app = AppScope.read(context);
     // Linger a little longer when there's an error, so the reason can be read.
-    Timer(Duration(milliseconds: calls.error != null ? 3500 : 1100), () {
+    Timer(Duration(milliseconds: calls.error != null ? 2500 : 900), () {
       if (!mounted) return;
       final review = calls.reviewReady.value;
       calls.reviewReady.value = null;
+      final peer = calls.peerName;
       calls.dismiss();
       app.refresh();
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      final nav = Navigator.of(context);
+      nav.pop();
       if (review != null) {
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => PostCallReviewScreen(callId: review, flagged: flagged)));
-      } else {
-        Navigator.of(context).maybePop();
+        messenger?.showSnackBar(SnackBar(
+          duration: const Duration(seconds: 8),
+          content: Text('Pulling the commitments out of your call with $peer…'),
+          action: SnackBarAction(
+            label: 'Review',
+            onPressed: () => nav.push(MaterialPageRoute(builder: (_) => PostCallReviewScreen(callId: review, flagged: flagged))),
+          ),
+        ));
       }
     });
   }
@@ -68,7 +77,7 @@ class _InCallScreenState extends State<InCallScreen> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final p = calls.recorded ? ModePalette.corporate : app.palette;
+    final p = calls.call?.mode == AppMode.corporate ? ModePalette.corporate : calls.call == null ? app.palette : ModePalette.personal;
     return PopScope(
       canPop: !calls.busy,
       child: ListenableBuilder(
@@ -88,7 +97,10 @@ class _InCallScreenState extends State<InCallScreen> with SingleTickerProviderSt
                 child: Column(children: [
                   const SizedBox(height: 12),
                   calls.recorded
-                      ? const RecordingBadge()
+                      ? RecordingBadge(
+                          label: calls.call?.mode == AppMode.personal
+                              ? 'Personal · recorded temporarily for commitments'
+                              : 'Recording · Commit AI is listening')
                       : const Pill('Personal · not recorded', color: AppColors.textDim, icon: Icons.lock_rounded),
                   const SizedBox(height: 28),
                   _PulsingAvatar(name: calls.peerName, animation: _pulse, pulsing: !active && calls.phase != CallPhase.ended, accent: p.accent),
@@ -104,7 +116,8 @@ class _InCallScreenState extends State<InCallScreen> with SingleTickerProviderSt
                   Text(_status(),
                       style: TextStyle(
                         fontSize: 16,
-                        color: calls.phase == CallPhase.ended ? AppColors.danger : AppColors.textDim,
+                        color: calls.phase == CallPhase.ended && calls.error != null ? AppColors.danger : AppColors.textDim,
+                        fontWeight: calls.phase == CallPhase.active ? FontWeight.w700 : FontWeight.w500,
                         fontFeatures: const [FontFeature.tabularFigures()],
                       )),
                   const SizedBox(height: 18),

@@ -96,6 +96,7 @@ class CallController extends ChangeNotifier {
       phase = CallPhase.ringing;
       notifyListeners();
       await _join(start.roomUrl, start.token, scripted: recorded && isClient);
+      if (phase == CallPhase.ringing) unawaited(CallService.ringback());
       _watchCall();
       return null;
     } catch (e) {
@@ -192,6 +193,7 @@ class CallController extends ChangeNotifier {
   }
 
   void _connected() {
+    unawaited(CallService.stopRingback());
     if (phase == CallPhase.active) return;
     phase = CallPhase.active;
     connectedAt = DateTime.now();

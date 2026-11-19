@@ -1,30 +1,62 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Android "call in progress" foreground service (android/.../CallService.kt).
-/// Without it Android silences the microphone as soon as the screen locks or the
-/// user switches apps, so the other side stops hearing them mid-call.
+/// Native call plumbing on Android (android/.../MainActivity.kt, CallService.kt, CallAlerts.kt):
+/// * a "call in progress" foreground service, without which Android silences the microphone as
+///   soon as the screen locks or the user switches apps;
+/// * the ringtone, vibration and full-screen alert for incoming calls;
+/// * the ringback tone the caller hears while the other phone rings.
+/// Everything is best effort: a failure here never stops the call itself.
 class CallService {
   static const _channel = MethodChannel('commitai/call_service');
   static bool _running = false;
+  static bool _ringing = false;
+  static bool _ringback = false;
 
   static bool get _android => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
-  static Future<void> start(String peer) async {
-    if (!_android || _running) return;
+  static Future<void> _call(String method, [Map<String, Object?>? args]) async {
+    if (!_android) return;
     try {
-      await _channel.invokeMethod('start', {'peer': peer});
-      _running = true;
-    } catch (_) {
-      // Best effort: the call still works while the app is on screen.
-    }
+      await _channel.invokeMethod(method, args);
+    } catch (_) {}
+  }
+
+  static Future<void> start(String peer) async {
+    if (_running) return;
+    _running = true;
+    await _call('start', {'peer': peer});
   }
 
   static Future<void> stop() async {
-    if (!_android || !_running) return;
+    await stopRingback();
+    if (!_running) return;
     _running = false;
-    try {
-      await _channel.invokeMethod('stop');
-    } catch (_) {}
+    await _call('stop');
+  }
+
+  /// Incoming call: ringtone + vibration + full-screen notification (wakes the screen).
+  static Future<void> ring(String caller, {bool work = false}) async {
+    _ringing = true;
+    await _call('ring', {'caller': caller, 'work': work});
+  }
+
+  static Future<void> stopRing() async {
+    if (!_ringing) return;
+    _ringing = false;
+    await _call('stopRing');
+  }
+
+  /// Outgoing call: the "ring ring" the caller hears until the other side answers.
+  static Future<void> ringback() async {
+    if (_ringback) return;
+    _ringback = true;
+    await _call('ringback');
+  }
+
+  static Future<void> stopRingback() async {
+    if (!_ringback) return;
+    _ringback = false;
+    await _call('stopRingback');
   }
 }

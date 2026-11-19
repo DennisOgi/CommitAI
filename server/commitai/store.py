@@ -129,7 +129,9 @@ class SupabaseStore(Store):
         params = {k: ("is.null" if v is None else f"eq.{str(v).lower() if isinstance(v, bool) else v}")
                   for k, v in eq.items()}
         for k, vs in (in_ or {}).items():
-            params[k] = "in.(" + ",".join(str(v) for v in vs) + ")"
+            # Quote each value so commas, dots or brackets inside one can't break the list.
+            quoted = ('"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"' for v in vs)
+            params[k] = "in.(" + ",".join(quoted) + ")"
         return params
 
     async def select(self, table, *, order=None, desc=False, limit=None, in_=None, contains=None, **eq):

@@ -173,8 +173,7 @@ class _Notice extends StatelessWidget {
           SizedBox(width: 10),
           Expanded(
             child: Text(
-              'In Work mode, calls are recorded and commitments are shared with your managers. '
-              'Personal calls are held until you switch back, and nothing personal is ever recorded.',
+              'Personal calls are only recorded temporarily for extraction of commitments and thereafter deleted.',
               style: TextStyle(fontSize: 13, color: AppColors.text, height: 1.4),
             ),
           ),

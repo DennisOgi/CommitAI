@@ -168,7 +168,7 @@ class _KeypadScreenState extends State<KeypadScreen> {
               app.corporate
                   ? 'Calls go out from ${app.session?.organization?.name ?? 'your company'} · recorded'
                   : app.recordsPersonalCalls
-                      ? 'Personal call · recorded for you only'
+                      ? 'Personal call · recorded temporarily, then deleted'
                       : 'Personal call · not recorded',
               style: TextStyle(fontSize: 12, color: app.corporate ? p.accent : AppColors.textFaint, fontWeight: FontWeight.w600),
             ),
