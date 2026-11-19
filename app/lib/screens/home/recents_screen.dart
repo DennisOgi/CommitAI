@@ -65,6 +65,7 @@ class RecentsScreen extends StatelessWidget {
                     name: c.counterpartName,
                     pstn: c.channel != CallChannel.app,
                     phone: c.counterpartNumber,
+                    calleeUserId: c.channel == CallChannel.app ? c.counterpartUserId : null,
                     contactId: c.contactId,
                     isClient: c.mode == AppMode.corporate,
                   ),

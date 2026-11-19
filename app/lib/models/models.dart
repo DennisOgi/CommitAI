@@ -138,6 +138,7 @@ class CallRecord {
     required this.startedAt,
     this.counterpartNumber,
     this.contactId,
+    this.counterpartUserId,
     this.answeredAt,
     this.endedAt,
     this.summary,
@@ -155,6 +156,9 @@ class CallRecord {
   final String counterpartName;
   final String? counterpartNumber;
   final String? contactId;
+
+  /// The other person's Commit AI account, for app calls (call back from Recents).
+  final String? counterpartUserId;
   final DateTime startedAt;
   final DateTime? answeredAt;
   final DateTime? endedAt;
@@ -178,6 +182,7 @@ class CallRecord {
         counterpartName: j['counterpart_name'] ?? 'Unknown',
         counterpartNumber: j['counterpart_number'],
         contactId: j['contact_id'],
+        counterpartUserId: j['counterpart_user_id'],
         startedAt: _dt(j['started_at']) ?? DateTime.now(),
         answeredAt: _dt(j['answered_at']),
         endedAt: _dt(j['ended_at']),

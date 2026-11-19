@@ -538,7 +538,7 @@ async def start_call(body: OutboundCall, user_id: str = CurrentUser):
     else:
         callee = body.callee_user_id or (contact or {}).get("app_user_id")
         if not callee:
-            raise HTTPException(422, "callee_user_id required for app calls")
+            raise HTTPException(422, "This person isn't linked to a Commit AI account, so an app call isn't possible. Call their phone number instead.")
         if callee == user_id:
             raise HTTPException(422, "you can't call yourself")
         if not await db.get("profiles", id=callee):
