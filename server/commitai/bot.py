@@ -218,7 +218,7 @@ class CallBot:
         speaker_uid = self.ever.get(pid)
         for emp_pid, emp_uid in list(self.participants.items()):
             if emp_uid in self.employees:
-                await self.transport.send_message(DailyOutputTransportMessageUrgentFrame(
+                await self.task.queue_frame(DailyOutputTransportMessageUrgentFrame(
                     message={"type": "caption", "speaker": "employee" if speaker_uid == emp_uid else "client",
                              "text": text, "offset_ms": offset},
                     participant_id=emp_pid))
@@ -228,7 +228,7 @@ class CallBot:
             for c in self.live.detect(text, "employee", offset, datetime.now(timezone.utc)):
                 if c.confidence < 0.6:
                     continue
-                await self.transport.send_message(DailyOutputTransportMessageUrgentFrame(
+                await self.task.queue_frame(DailyOutputTransportMessageUrgentFrame(
                     message={"type": "commitment_detected", "title": c.title, "due_text": c.due_text,
                              "category": c.category, "quote": c.quote, "offset_ms": offset},
                     participant_id=pid))

@@ -9,6 +9,7 @@ import '../data/backend.dart';
 import '../data/demo_backend.dart';
 import '../models/models.dart';
 import 'call_engine.dart';
+import 'call_service.dart';
 import 'daily_call_engine.dart';
 import 'demo_call_engine.dart';
 
@@ -95,7 +96,7 @@ class CallController extends ChangeNotifier {
       phase = CallPhase.ringing;
       notifyListeners();
       await _join(start.roomUrl, start.token, scripted: recorded && isClient);
-      _watchRinging();
+      _watchCall();
       return null;
     } catch (e) {
       error = e.toString();
@@ -132,6 +133,7 @@ class CallController extends ChangeNotifier {
       disclosure = r.disclosure;
       call = (await backend.callDetail(incoming.callId)).call;
       await _join(r.roomUrl, r.token, scripted: recorded);
+      _watchCall();
     } catch (e) {
       error = e.toString();
       unawaited(backend.reportProblem('accept', error!, callId: incoming.callId));
@@ -148,23 +150,27 @@ class CallController extends ChangeNotifier {
         ? DemoCallEngine(backend: b, callId: call!.id, peerName: peerName, scripted: scripted)
         : DailyCallEngine();
     _sub = _engine!.events.listen(_onEngine);
+    unawaited(CallService.start(peerName));
     await _engine!.join(roomUrl: roomUrl, token: token, userName: userName);
     if (!outbound) _connected();
   }
 
-  /// While an outbound call rings: stop after [ringTimeout], and hang up if the
-  /// other side declined (the server marks the call rejected / missed).
-  void _watchRinging() {
+  /// Watches the call on the server for as long as it lasts:
+  /// * while an outbound call rings: give up after [ringTimeout], and stop if the other side
+  ///   declined or the call was missed;
+  /// * once connected: if the other side hung up (the server marks the call completed), end it
+  ///   here too, even if the audio connection didn't tell us.
+  void _watchCall() {
     if (backend is DemoBackend) return;
     final started = DateTime.now();
     _ringWatch?.cancel();
     _ringWatch = Timer.periodic(const Duration(seconds: 3), (t) async {
       final c = call;
-      if (phase != CallPhase.ringing || c == null) {
+      if (c == null || phase == CallPhase.ended || phase == CallPhase.idle) {
         t.cancel();
         return;
       }
-      if (DateTime.now().difference(started) > ringTimeout) {
+      if (phase == CallPhase.ringing && DateTime.now().difference(started) > ringTimeout) {
         t.cancel();
         error = 'No answer.';
         await hangUp();
@@ -172,19 +178,20 @@ class CallController extends ChangeNotifier {
       }
       try {
         final status = (await backend.callDetail(c.id)).call.status;
-        if (phase == CallPhase.ringing && status != 'ringing' && status != 'active') {
-          t.cancel();
+        if (status == 'ringing' || status == 'active') return;
+        if (phase == CallPhase.ended || phase == CallPhase.idle) return;
+        t.cancel();
+        if (phase == CallPhase.ringing || phase == CallPhase.connecting) {
           error = status == 'rejected' ? '$peerName declined the call.' : 'No answer.';
-          await hangUp();
         }
+        await hangUp(); // the other side ended it
       } catch (_) {
-        // Keep ringing; transient network errors shouldn't drop the call.
+        // Transient network errors shouldn't drop the call.
       }
     });
   }
 
   void _connected() {
-    _ringWatch?.cancel();
     if (phase == CallPhase.active) return;
     phase = CallPhase.active;
     connectedAt = DateTime.now();
@@ -256,6 +263,7 @@ class CallController extends ChangeNotifier {
     _ticker?.cancel();
     _ringWatch?.cancel();
     notifyListeners();
+    unawaited(CallService.stop());
     if (c != null) {
       // Tell the server first, so the other phone hangs up even if leaving the room is slow.
       try {
@@ -300,6 +308,7 @@ class CallController extends ChangeNotifier {
 
   @override
   void dispose() {
+    unawaited(CallService.stop());
     _ticker?.cancel();
     _ringWatch?.cancel();
     _sub?.cancel();

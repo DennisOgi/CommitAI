@@ -46,6 +46,13 @@ class DailyCallEngine implements CallEngine {
             ),
           )
           .timeout(joinTimeout);
+      // Whoever was already in the room (the caller, when we're answering) never sends a
+      // "participant joined" event, so register them now. Otherwise we'd never notice them leave.
+      for (final p in client.participants.remote.values) {
+        if (p.info.userId == botUserId) continue;
+        if (_humans.add(p.id.toString())) _events.add(RemoteJoined(p.info.username ?? 'Caller'));
+      }
+      await _defaultAudioRoute(client);
     } on TimeoutException {
       _events.add(EngineError('Couldn’t connect the call audio (timed out).'));
       throw const CallConnectException('Couldn’t connect the call audio. Check your connection and try again.');
@@ -83,6 +90,19 @@ class DailyCallEngine implements CallEngine {
     );
   }
 
+  /// Start on the earpiece like a normal phone call, unless a headset or Bluetooth is connected.
+  Future<void> _defaultAudioRoute(CallClient client) async {
+    try {
+      final devices = client.availableDevices.microphone;
+      bool has(String s) => devices.any((d) => '${d.label} ${d.deviceId}'.toLowerCase().contains(s));
+      if (has('bluetooth') || has('headset') || has('wired') || has('usb')) return;
+      final earpiece = devices.where((d) => '${d.label} ${d.deviceId}'.toLowerCase().contains('earpiece')).firstOrNull;
+      if (earpiece != null) await client.setAudioDevice(deviceId: earpiece.deviceId);
+    } catch (_) {
+      // Leave Daily's default route.
+    }
+  }
+
   @override
   Future<void> leave() async {
     _humans.clear();
@@ -100,7 +120,7 @@ class DailyCallEngine implements CallEngine {
     if (client == null) return;
     final devices = client.availableDevices.microphone; // mobile audio routes live here
     final want = devices.where((d) {
-      final label = d.label.toLowerCase();
+      final label = '${d.label} ${d.deviceId}'.toLowerCase();
       return on ? label.contains('speaker') : (label.contains('earpiece') || label.contains('phone') && !label.contains('speaker'));
     }).firstOrNull;
     if (want != null) await client.setAudioDevice(deviceId: want.deviceId);

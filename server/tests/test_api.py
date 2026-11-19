@@ -182,3 +182,28 @@ def test_work_call_to_someone_outside_the_company_rings(c):
     assert r.status_code == 200 and r.json()["decision"] == "ring", r.text
     ringing = next(x for x in c.get("/v1/calls/incoming", headers=H(CHIDI)).json())
     c.post(f"/v1/calls/{ringing['call_id']}/decline", headers=H(CHIDI))
+
+
+@pytest.mark.parametrize("caller_mode,callee_mode", [("personal", "corporate"), ("corporate", "personal"),
+                                                     ("personal", "personal"), ("corporate", "corporate")])
+def test_colleagues_always_reach_each_other(c, caller_mode, callee_mode):
+    # Ngozi (manager) and Kemi are colleagues at Lumen. Whatever mode either is in, the call rings.
+    from commitai.seed import KEMI
+    for uid, emp, mode in ((NGOZI, "EMP-1001", caller_mode), (KEMI, "EMP-1077", callee_mode)):
+        if mode == "corporate":
+            corp_login(c, uid, emp)
+        else:
+            c.post("/v1/presence", headers=H(uid), json={"mode": "personal"})
+    r = c.post("/v1/calls", headers=H(NGOZI), json={"channel": "app", "callee_user_id": KEMI})
+    assert r.status_code == 200 and r.json()["decision"] == "ring", (caller_mode, callee_mode, r.text)
+    inc = c.get("/v1/calls/incoming", headers=H(KEMI)).json()
+    assert inc, "callee must see the ringing call"
+    # Work call if either side is at work: recorded on Kemi's side for the company.
+    assert inc[0]["recorded"] is True or (caller_mode == callee_mode == "personal")
+    acc = c.post(f"/v1/calls/{inc[0]['call_id']}/accept", headers=H(KEMI))
+    assert acc.status_code == 200 and acc.json()["token"]
+    if inc[0]["mode"] == "corporate":
+        assert acc.json()["disclosure"]
+    c.post(f"/v1/calls/{inc[0]['call_id']}/end", headers=H(KEMI))
+    caller_leg = c.get(f"/v1/calls/{r.json()['call']['id']}", headers=H(NGOZI)).json()["call"]
+    assert caller_leg["status"] == "completed"

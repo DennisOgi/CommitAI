@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart' as phone;
+import 'package:permission_handler/permission_handler.dart' as perm;
 
 import '../../core/format.dart';
 import '../../core/theme.dart';
@@ -158,12 +159,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       ),
     );
     if (go != true || !mounted) return;
-    final status = await phone.FlutterContacts.permissions.request(phone.PermissionType.read);
-    if (status != phone.PermissionStatus.granted && status != phone.PermissionStatus.limited) {
-      if (!mounted) return;
-      toast(context, 'Contacts permission was not given. You can allow it in Settings.', icon: Icons.lock_outline_rounded);
-      return;
-    }
+    if (!await _contactsAllowed()) return;
     setState(() => _importing = true);
     try {
       final all = await phone.FlutterContacts.getAll(
@@ -184,7 +180,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
         r.imported == 0
             ? 'Your contacts are already up to date.'
             : 'Imported ${r.imported} contact${r.imported == 1 ? '' : 's'}'
-                '${r.onApp > 0 ? ' · ${r.onApp} on Commit AI' : ''}.',
+                '${r.onApp > 0 ? ' · ${r.onApp} on Commit AI' : ''}'
+                '${app.corporate ? '. Switch to Personal to see them' : ''}.',
         icon: Icons.check_circle_rounded,
       );
       app.refresh();
@@ -193,6 +190,42 @@ class _ContactsScreenState extends State<ContactsScreen> {
     } finally {
       if (mounted) setState(() => _importing = false);
     }
+  }
+
+  /// Shows Android's / iOS's contacts permission prompt. If the user blocked it earlier
+  /// (no prompt can be shown any more), offers to open the app's settings instead.
+  Future<bool> _contactsAllowed() async {
+    var status = await perm.Permission.contacts.status;
+    if (status.isGranted || status.isLimited) return true;
+    if (!status.isPermanentlyDenied && !status.isRestricted) {
+      try {
+        status = await perm.Permission.contacts.request();
+      } catch (_) {
+        // Another permission prompt was still open; ask once more.
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+        status = await perm.Permission.contacts.request();
+      }
+      if (status.isGranted || status.isLimited) return true;
+    }
+    if (!mounted) return false;
+    if (status.isPermanentlyDenied || status.isRestricted) {
+      final open = await showDialog<bool>(
+        context: context,
+        builder: (d) => AlertDialog(
+          title: const Text('Allow access to contacts'),
+          content: const Text('Contacts access is turned off for Commit AI. Open Settings → Permissions → '
+              'Contacts and choose Allow, then come back and try again.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Open Settings')),
+          ],
+        ),
+      );
+      if (open == true) await perm.openAppSettings();
+    } else {
+      toast(context, 'Contacts permission was not given.', icon: Icons.lock_outline_rounded);
+    }
+    return false;
   }
 
   void _open(Contact c) {
@@ -264,6 +297,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 icon: const Icon(Icons.contacts_rounded),
                 label: const Text('Pick from phone contacts'),
                 onPressed: () async {
+                  if (!await _contactsAllowed()) return;
                   final picked = await phone.FlutterContacts.native
                       .showPicker(properties: {phone.ContactProperty.name, phone.ContactProperty.phone, phone.ContactProperty.email});
                   if (picked == null) return;
@@ -356,8 +390,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   padding: EdgeInsets.fromLTRB(20, 12, 20, 0),
                   child: Text('Shared company directory. Personal contacts are hidden in Work mode.',
                       style: TextStyle(fontSize: 12, color: AppColors.textFaint)),
-                )
-              else if (_phoneContactsAvailable && !app.isDemo)
+                ),
+              if (_phoneContactsAvailable && !app.isDemo)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                   child: Card(
@@ -365,7 +399,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
                       leading: Icon(Icons.contacts_rounded, color: app.palette.accent),
                       title: Text(contacts.isEmpty ? 'Import your phone contacts' : 'Sync phone contacts',
                           style: const TextStyle(fontWeight: FontWeight.w700)),
-                      subtitle: const Text('Call them here and see who is on Commit AI. Private to you.'),
+                      subtitle: Text(app.corporate
+                          ? 'Saved to your private Personal contacts (switch to Personal to see them).'
+                          : 'Call them here and see who is on Commit AI. Private to you.'),
                       trailing: _importing
                           ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                           : const Icon(Icons.chevron_right_rounded),

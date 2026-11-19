@@ -29,7 +29,7 @@ from .config import settings
 from .daily import daily
 from .extractor import CATEGORIES, Segment, extract, merge_fragments
 from .push import pusher
-from .routing import Decision, InboundContext, Mode, route_inbound, should_record_outbound
+from .routing import Decision, InboundContext, Mode, RoutingResult, route_inbound, should_record_outbound
 from .store import Store, make_store, now_iso
 
 logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -615,10 +615,15 @@ async def _ring_app_user(callee_id, caller_call, caller_name, caller_id, caller_
                                for c in await db.select("contacts", org_id=callee_member["org_id"]))
     # If the callee belongs to an org but is off duty, policy comes from their org.
     off_duty_org = callee_org
-    colleague = False
-    if caller_member:
-        mships = await db.select("memberships", user_id=callee_id, org_id=caller_member["org_id"])
+    colleague, colleague_member = False, None
+    if caller_member or caller_call["mode"] != "corporate":
+        # Colleagues: the callee belongs to the caller's org (the caller's active one, or any org
+        # the caller is a member of when they're calling from Personal mode).
+        caller_orgs = ([caller_member["org_id"]] if caller_member else
+                       [m["org_id"] for m in await db.select("memberships", user_id=caller_id)])
+        mships = [m for m in await db.select("memberships", user_id=callee_id) if m["org_id"] in caller_orgs]
         colleague = bool(mships)
+        colleague_member = callee_member if callee_member and callee_member["org_id"] in caller_orgs else (mships or [None])[0]
         if not off_duty_org and mships:
             off_duty_org = await org_of(mships[0])
     callee_mode = Mode(callee_presence["mode"])
@@ -635,14 +640,21 @@ async def _ring_app_user(callee_id, caller_call, caller_name, caller_id, caller_
         off_duty_policy=(off_duty_org or {}).get("off_duty_policy", "voicemail"),
     )
     routing = route_inbound(ctx)
-    corp_record = routing.record and callee_member is not None
+    record_member = callee_member
+    if colleague:
+        # Colleagues always reach each other, whatever mode either is in. It's a work call
+        # (recorded for the company) if either side is at work; otherwise an ordinary call.
+        work = callee_mode is Mode.corporate or caller_call["mode"] == "corporate"
+        routing = RoutingResult(Decision.ring, record=work, reason="colleague")
+        record_member = colleague_member
+    corp_record = routing.record and record_member is not None
     personal_record = (not corp_record and routing.decision is Decision.ring
                        and await records_personal(callee_id))
     callee_record = corp_record or personal_record
     callee_call = (await db.insert("calls", {
         "mode": "corporate" if corp_record else "personal",
-        "org_id": callee_member["org_id"] if corp_record else None,
-        "membership_id": callee_member["id"] if corp_record else None,
+        "org_id": record_member["org_id"] if corp_record else None,
+        "membership_id": record_member["id"] if corp_record else None,
         "user_id": callee_id, "direction": "inbound", "channel": "app",
         "counterpart_name": caller_name, "counterpart_user_id": caller_id,
         "daily_room": caller_call["daily_room"], "daily_room_url": room_url, "started_at": now_iso(),
@@ -681,8 +693,7 @@ async def accept_call(call_id: str, user_id: str = CurrentUser):
     for c in await db.select("calls", daily_room=call["daily_room"]):
         if c["status"] == "ringing" or c["id"] == call_id:
             await db.update("calls", {"status": "active", "answered_at": now}, id=c["id"])
-    member = await active_membership(user_id)
-    org = await org_of(member) if call["mode"] == "corporate" else None
+    org = await db.get("organizations", id=call["org_id"]) if call["mode"] == "corporate" and call.get("org_id") else None
     recorded = is_recorded(call)
     return {"room_url": call.get("daily_room_url") or f"https://demo.daily.co/{call['daily_room']}",
             "token": await daily.token(call["daily_room"], user_id=user_id, user_name=await name_of(user_id)),
