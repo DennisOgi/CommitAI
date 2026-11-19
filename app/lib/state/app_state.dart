@@ -279,6 +279,20 @@ class AppState extends ChangeNotifier {
 
   bool get recordsPersonalCalls => session?.profile.recordPersonalCalls ?? true;
 
+  bool get discoverable => session?.profile.discoverable ?? true;
+
+  /// The "Let people find me" switch.
+  Future<String?> setDiscoverable(bool on) async {
+    try {
+      final saved = await backend!.setDiscoverable(on);
+      session?.profile.discoverable = saved;
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
   /// The "Record my personal calls" switch.
   Future<String?> setRecordPersonalCalls(bool on) async {
     try {

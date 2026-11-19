@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart' as phone;
@@ -20,6 +22,118 @@ class ContactsScreen extends StatefulWidget {
 class _ContactsScreenState extends State<ContactsScreen> {
   String _q = '';
   bool _importing = false;
+
+  // "On Commit AI": everyone with an account, found by name or email.
+  Timer? _debounce;
+  List<PlatformUser> _people = [];
+  bool _searching = false;
+  String _searchedFor = '';
+  final Set<String> _saving = {};
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _onQuery(String v) {
+    setState(() => _q = v);
+    _debounce?.cancel();
+    final q = v.trim();
+    if (q.length < 2) {
+      setState(() => _people = []);
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 350), () => _searchPeople(q));
+  }
+
+  Future<void> _searchPeople(String q) async {
+    final app = AppScope.read(context);
+    if (app.backend == null) return;
+    setState(() => _searching = true);
+    try {
+      final r = await app.backend!.searchUsers(q);
+      if (mounted && _q.trim() == q) {
+        setState(() {
+          _people = r;
+          _searchedFor = q;
+        });
+      }
+    } catch (_) {
+      // Search is best-effort; the local list still works.
+    } finally {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  Future<void> _savePerson(PlatformUser u) async {
+    final app = AppScope.read(context);
+    setState(() => _saving.add(u.userId));
+    try {
+      await app.backend!.addAppUser(name: u.fullName, userId: u.userId);
+      if (!mounted) return;
+      toast(context, '${u.fullName} saved to your contacts.', icon: Icons.check_rounded);
+      app.refresh();
+      await _searchPeople(_q.trim());
+    } catch (e) {
+      if (mounted) toast(context, '$e', icon: Icons.error_outline_rounded);
+    } finally {
+      if (mounted) setState(() => _saving.remove(u.userId));
+    }
+  }
+
+  List<Widget> _peopleSection(AppState app, List<Contact> contacts) {
+    final q = _q.trim();
+    if (q.length < 2 || app.isDemo) return const [];
+    final mine = {for (final c in contacts) if (c.appUserId != null) c.appUserId!};
+    final people = [for (final u in _people) if (!mine.contains(u.userId)) u];
+    final theme = Theme.of(context);
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
+        child: Row(children: [
+          Icon(Icons.public_rounded, size: 16, color: app.palette.accent),
+          const SizedBox(width: 6),
+          Text('ON COMMIT AI',
+              style: theme.textTheme.labelMedium?.copyWith(letterSpacing: 1.2, fontWeight: FontWeight.w700)),
+          const Spacer(),
+          if (_searching) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+        ]),
+      ),
+      if (people.isEmpty && !_searching && _searchedFor == q)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
+          child: Text(
+            q.contains('@')
+                ? 'No account uses that email yet. Ask them to download Commit AI.'
+                : 'No one named "$q" yet. Try their full name or their email.',
+            style: const TextStyle(fontSize: 13, color: AppColors.textFaint),
+          ),
+        ),
+      for (final u in people)
+        ListTile(
+          contentPadding: const EdgeInsets.fromLTRB(20, 2, 12, 2),
+          leading: Avatar(name: u.fullName),
+          title: Text(u.fullName, style: const TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: Text(u.emailHint ?? 'On Commit AI'),
+          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (u.contactId == null)
+              IconButton(
+                tooltip: 'Save contact',
+                onPressed: _saving.contains(u.userId) ? null : () => _savePerson(u),
+                icon: _saving.contains(u.userId)
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.person_add_alt_rounded),
+              ),
+            IconButton.filledTonal(
+              tooltip: 'Free app call',
+              onPressed: () => placeCall(context, name: u.fullName, calleeUserId: u.userId, contactId: u.contactId),
+              icon: const Icon(Icons.wifi_calling_3_rounded),
+            ),
+          ]),
+        ),
+    ];
+  }
 
   static bool get _phoneContactsAvailable =>
       !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
@@ -229,9 +343,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: TextField(
-                  onChanged: (v) => setState(() => _q = v),
+                  onChanged: _onQuery,
+                  textInputAction: TextInputAction.search,
                   decoration: InputDecoration(
-                    hintText: app.corporate ? 'Search clients and companies' : 'Search contacts',
+                    hintText: app.corporate ? 'Search clients, or anyone on Commit AI' : 'Search contacts or anyone on Commit AI',
                     prefixIcon: const Icon(Icons.search_rounded),
                   ),
                 ),
@@ -272,6 +387,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   ]),
                   onTap: () => _open(c),
                 ),
+              ..._peopleSection(app, contacts),
             ]),
           );
         },

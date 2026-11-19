@@ -69,6 +69,10 @@ mode is on, personal calls are held, not rung.
 - **Deadline reminders on the phone:** a day before and 2 hours before every dated commitment, scheduled
   on the device so they arrive even when the app is closed and without push set up; plus a "deadline
   passed" notice. (With push configured, the server sends the same reminders by push too.)
+- **Find anyone on Commit AI**: app-to-app calls aren't limited to your company. Anyone with an
+  account can search by name (or exact email) from the Contacts search box, call them for free, and
+  save them as a contact. Emails are shown masked; "Let people find me" (menu) hides you from name
+  search. A work-mode call to someone outside your company who is in Personal mode rings normally.
 - **Import phone contacts** (Personal mode): with permission, the phone's address book is imported into
   the user's private contacts; numbers are normalised (`0803…` → `+234803…`), duplicates skipped, and
   contacts who use Commit AI are marked for free app calls. In Work mode, a client can be picked from the
@@ -461,6 +465,7 @@ All `/v1` endpoints take `Authorization: Bearer <Supabase access token>`.
 | `POST /v1/presence` | switch Personal / Work |
 | `POST /v1/devices` | register a push token |
 | `GET/POST /v1/contacts` | contacts (Personal) or company clients (Work); add by phone and/or email |
+| `GET /v1/users/search?q=` | find people on Commit AI by name (2+ chars) or exact email |
 | `POST /v1/contacts/import` | import the phone's address book into personal contacts |
 | `PATCH /v1/me/settings` | e.g. `record_personal_calls` |
 | `POST /v1/calls` | start a call (`channel: app` or `pstn`) → room URL + token |

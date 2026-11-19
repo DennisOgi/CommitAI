@@ -23,15 +23,39 @@ T _enum<T extends Enum>(List<T> values, dynamic raw, T fallback) {
 String enumWire(Enum e) => _snake(e.name);
 
 class Profile {
-  Profile({required this.id, required this.fullName, this.recordPersonalCalls = true});
+  Profile({required this.id, required this.fullName, this.recordPersonalCalls = true, this.discoverable = true});
   final String id;
   final String fullName;
 
   /// Personal calls are recorded for the user's own commitments (private to them) unless switched off.
   bool recordPersonalCalls;
 
+  /// Others can find this user by name in "On Commit AI" search.
+  bool discoverable;
+
   factory Profile.fromJson(Map<String, dynamic> j) =>
-      Profile(id: j['id'], fullName: j['full_name'] ?? '', recordPersonalCalls: j['record_personal_calls'] ?? true);
+      Profile(
+        id: j['id'],
+        fullName: j['full_name'] ?? '',
+        recordPersonalCalls: j['record_personal_calls'] ?? true,
+        discoverable: j['discoverable'] ?? true,
+      );
+}
+
+/// Someone with a Commit AI account, found by search. App calls to them are free.
+class PlatformUser {
+  PlatformUser({required this.userId, required this.fullName, this.emailHint, this.contactId});
+  final String userId;
+  final String fullName;
+  final String? emailHint;
+  final String? contactId;
+
+  factory PlatformUser.fromJson(Map<String, dynamic> j) => PlatformUser(
+        userId: j['user_id'],
+        fullName: j['full_name'] ?? 'Commit AI user',
+        emailHint: j['email_hint'],
+        contactId: j['contact_id'],
+      );
 }
 
 class Organization {

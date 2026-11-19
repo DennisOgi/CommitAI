@@ -238,6 +238,7 @@ async def me(user_id: str = CurrentUser):
 
 class SettingsBody(BaseModel):
     record_personal_calls: bool | None = None
+    discoverable: bool | None = None          # "Let people find me" in search
 
 
 @app.patch("/v1/me/settings")
@@ -246,7 +247,8 @@ async def update_settings(body: SettingsBody, user_id: str = CurrentUser):
     if patch:
         await db.update("profiles", patch, id=user_id)
     prof = await db.get("profiles", id=user_id) or {}
-    return {"record_personal_calls": prof.get("record_personal_calls", True)}
+    return {"record_personal_calls": prof.get("record_personal_calls", True),
+            "discoverable": prof.get("discoverable", True)}
 
 
 def _public_member(m: dict) -> dict:
@@ -347,6 +349,8 @@ class ContactBody(BaseModel):
     phone_e164: str | None = Field(default=None, pattern=E164)
     # Email of a Commit AI user: links the contact to their account so they can be app-called.
     email: str | None = Field(default=None, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    # Or the account id of someone found with /v1/users/search.
+    app_user_id: str | None = Field(default=None, max_length=64)
     is_client: bool = True
 
 
@@ -354,16 +358,51 @@ class ContactBody(BaseModel):
 async def add_contact(body: ContactBody, user_id: str = CurrentUser):
     m = await active_membership(user_id)
     app_user = None
-    if body.email:
+    if body.app_user_id:
+        app_user = await db.get("profiles", id=body.app_user_id)
+        if not app_user:
+            raise HTTPException(404, "That person no longer has a Commit AI account.")
+    elif body.email:
         app_user = await db.get("profiles", email=body.email.strip().lower())
-        if app_user and app_user["id"] == user_id:
-            raise HTTPException(422, "That's your own email.")
+    if app_user and app_user["id"] == user_id:
+        raise HTTPException(422, "That's you.")
     if not body.phone_e164 and not app_user:
         raise HTTPException(422, "No Commit AI account uses that email. Add a phone number instead, "
                                  "or ask them to sign up first." if body.email else "Add a phone number or an email.")
-    row = {**body.model_dump(exclude={"email"}), "owner_id": user_id, "org_id": m["org_id"] if m else None,
+    row = {**body.model_dump(exclude={"email", "app_user_id"}), "owner_id": user_id, "org_id": m["org_id"] if m else None,
            "app_user_id": app_user["id"] if app_user else None}
     return (await db.insert("contacts", row))[0]
+
+
+def _mask_email(email: str | None) -> str | None:
+    if not email or "@" not in email:
+        return None
+    local, domain = email.split("@", 1)
+    return local[:2] + "•" * max(1, len(local) - 2) + "@" + domain
+
+
+@app.get("/v1/users/search")
+async def search_users(q: str = "", user_id: str = CurrentUser):
+    """Find people on Commit AI to call: by name (2+ characters) or by exact email.
+    Anyone with an account can be found unless they turned "Let people find me" off;
+    an exact email always matches. Emails are masked so the list can't be harvested."""
+    q = " ".join(q.split())[:80]
+    if len(q) < 2:
+        return []
+    found: dict[str, dict] = {}
+    if "@" in q:
+        for p in await db.select("profiles", email=q.lower(), limit=1):
+            found[p["id"]] = p
+    else:
+        for p in await db.select("profiles", contains={"full_name": q}, order="full_name", limit=40):
+            if p.get("discoverable", True) is not False:
+                found[p["id"]] = p
+    found.pop(user_id, None)
+    saved = {c["app_user_id"]: c["id"] for c in await db.select("contacts", owner_id=user_id)
+             if c.get("app_user_id")}
+    return [{"user_id": p["id"], "full_name": p.get("full_name") or "Commit AI user",
+             "email_hint": _mask_email(p.get("email")), "contact_id": saved.get(p["id"])}
+            for p in list(found.values())[:20]]
 
 
 class PhoneContact(BaseModel):
@@ -502,6 +541,8 @@ async def start_call(body: OutboundCall, user_id: str = CurrentUser):
             raise HTTPException(422, "callee_user_id required for app calls")
         if callee == user_id:
             raise HTTPException(422, "you can't call yourself")
+        if not await db.get("profiles", id=callee):
+            raise HTTPException(404, "That person no longer has a Commit AI account.")
         phone, channel, counterpart = None, "app", await name_of(callee)
 
     # App calls: the callee may record even if the caller doesn't, so allow recording in the room
@@ -574,13 +615,21 @@ async def _ring_app_user(callee_id, caller_call, caller_name, caller_id, caller_
                                for c in await db.select("contacts", org_id=callee_member["org_id"]))
     # If the callee belongs to an org but is off duty, policy comes from their org.
     off_duty_org = callee_org
-    if not off_duty_org and caller_member:
+    colleague = False
+    if caller_member:
         mships = await db.select("memberships", user_id=callee_id, org_id=caller_member["org_id"])
-        off_duty_org = await org_of(mships[0]) if mships else None
+        colleague = bool(mships)
+        if not off_duty_org and mships:
+            off_duty_org = await org_of(mships[0])
+    callee_mode = Mode(callee_presence["mode"])
+    # A work call only counts as "corporate" for the callee when they're at work themselves
+    # (B2B: any org) or they're the caller's colleague. A work-mode caller ringing someone
+    # outside their company who is in personal mode is an ordinary call: it rings.
+    corporate_for_callee = caller_call["mode"] == "corporate" and (callee_mode is Mode.corporate or colleague)
     ctx = InboundContext(
-        callee_mode=Mode(callee_presence["mode"]),
+        callee_mode=callee_mode,
         callee_org_id=callee_member["org_id"] if callee_member else None,
-        call_is_corporate=caller_call["mode"] == "corporate",
+        call_is_corporate=corporate_for_callee,
         caller_org_id=caller_member["org_id"] if caller_member else None,
         caller_is_org_client=caller_is_client,
         off_duty_policy=(off_duty_org or {}).get("off_duty_policy", "voicemail"),

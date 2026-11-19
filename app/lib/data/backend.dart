@@ -52,6 +52,16 @@ abstract class Backend {
   /// The employee flagged a moment of a live work call as a commitment.
   Future<void> flagMoment(String callId, int offsetMs) async {}
 
+  /// People on Commit AI matching a name (2+ letters) or an exact email.
+  Future<List<PlatformUser>> searchUsers(String q) async => [];
+
+  /// Save someone found by search as a contact.
+  Future<Contact> addAppUser({required String name, required String userId}) =>
+      throw UnsupportedError('Not available in the demo.');
+
+  /// "Let people find me" on/off. Returns the saved value.
+  Future<bool> setDiscoverable(bool on) async => on;
+
   /// Personal-call recording on/off. Returns the saved value.
   Future<bool> setRecordPersonalCalls(bool on) async => on;
 

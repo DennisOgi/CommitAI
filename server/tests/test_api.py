@@ -129,7 +129,7 @@ def test_personal_call_recorded_privately(c):
 
 def test_personal_recording_can_be_switched_off(c):
     c.post("/v1/presence", headers=H(TUNDE), json={"mode": "personal"})
-    assert c.patch("/v1/me/settings", headers=H(TUNDE), json={"record_personal_calls": False}).json() == {"record_personal_calls": False}
+    assert c.patch("/v1/me/settings", headers=H(TUNDE), json={"record_personal_calls": False}).json()["record_personal_calls"] is False
     r = c.post("/v1/calls", headers=H(TUNDE), json={"channel": "pstn", "phone": "+2348030000000"}).json()
     assert not r["recorded"] and r["call"]["processing"] == "not_applicable" and r["disclosure"] is None
     c.patch("/v1/me/settings", headers=H(TUNDE), json={"record_personal_calls": True})
@@ -148,3 +148,37 @@ async def test_scheduler_marks_missed_and_auto_publishes():
     later = datetime.now(timezone.utc) + timedelta(days=3)
     stats = await tick(db, later)
     assert stats["missed"] >= 2 and stats["auto_published"] >= 0
+
+
+def test_find_people_on_commit_ai(c):
+    r = c.get("/v1/users/search", headers=H(TUNDE), params={"q": "chi"}).json()
+    hit = next(x for x in r if x["user_id"] == CHIDI)
+    assert hit["full_name"] == "Chidi Nwosu" and "example.com" in hit["email_hint"]
+    assert "chidi@" not in hit["email_hint"]                       # masked
+    assert all(x["user_id"] != TUNDE for x in c.get("/v1/users/search", headers=H(TUNDE),
+                                                     params={"q": "tunde"}).json())   # never yourself
+    assert c.get("/v1/users/search", headers=H(TUNDE), params={"q": "c"}).json() == []
+    assert c.get("/v1/users/search", headers=H(TUNDE), params={"q": "CHIDI@example.com"}).json()[0]["user_id"] == CHIDI
+
+    # Opting out hides you from name search (exact email still works).
+    c.patch("/v1/me/settings", headers=H(CHIDI), json={"discoverable": False})
+    assert all(x["user_id"] != CHIDI for x in c.get("/v1/users/search", headers=H(TUNDE), params={"q": "chidi"}).json())
+    assert c.get("/v1/users/search", headers=H(TUNDE), params={"q": "chidi@example.com"}).json()
+    c.patch("/v1/me/settings", headers=H(CHIDI), json={"discoverable": True})
+
+    # Save a found person as a contact.
+    c.post("/v1/presence", headers=H(TUNDE), json={"mode": "personal"})
+    row = c.post("/v1/contacts", headers=H(TUNDE), json={"name": "Chidi Nwosu", "app_user_id": CHIDI, "is_client": False})
+    assert row.status_code == 200 and row.json()["app_user_id"] == CHIDI
+    assert c.get("/v1/users/search", headers=H(TUNDE), params={"q": "chidi"}).json()[0]["contact_id"] == row.json()["id"]
+    assert c.post("/v1/calls", headers=H(TUNDE), json={"channel": "app", "callee_user_id": "nobody"}).status_code == 404
+
+
+def test_work_call_to_someone_outside_the_company_rings(c):
+    # Ada is at work; Chidi isn't in her company and is in personal mode → it rings (no voicemail).
+    corp_login(c, ADA, "EMP-1042")
+    c.post("/v1/presence", headers=H(CHIDI), json={"mode": "personal"})
+    r = c.post("/v1/calls", headers=H(ADA), json={"channel": "app", "callee_user_id": CHIDI})
+    assert r.status_code == 200 and r.json()["decision"] == "ring", r.text
+    ringing = next(x for x in c.get("/v1/calls/incoming", headers=H(CHIDI)).json())
+    c.post(f"/v1/calls/{ringing['call_id']}/decline", headers=H(CHIDI))

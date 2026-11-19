@@ -165,6 +165,20 @@ class _HomeShellState extends State<HomeShell> {
               },
             ),
           ),
+          StatefulBuilder(
+            builder: (context, setSheet) => SwitchListTile(
+              secondary: const Icon(Icons.travel_explore_rounded),
+              title: const Text('Let people find me'),
+              subtitle: const Text('Anyone on Commit AI can search your name and call you. '
+                  'Off: only people who know your email can.'),
+              value: app.discoverable,
+              onChanged: (v) async {
+                final err = await app.setDiscoverable(v);
+                setSheet(() {});
+                if (err != null && context.mounted) toast(context, err, icon: Icons.error_outline_rounded);
+              },
+            ),
+          ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.logout_rounded, color: AppColors.danger),

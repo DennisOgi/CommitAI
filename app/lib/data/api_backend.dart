@@ -156,6 +156,18 @@ class ApiBackend extends Backend {
       _req('POST', '/v1/devices', body: {'platform': platform, 'push_token': pushToken});
 
   @override
+  Future<List<PlatformUser>> searchUsers(String q) async =>
+      [for (final u in await _req('GET', '/v1/users/search', query: {'q': q})) PlatformUser.fromJson(u)];
+
+  @override
+  Future<Contact> addAppUser({required String name, required String userId}) async => Contact.fromJson(
+      await _req('POST', '/v1/contacts', body: {'name': name, 'app_user_id': userId, 'is_client': false}));
+
+  @override
+  Future<bool> setDiscoverable(bool on) async =>
+      (await _req('PATCH', '/v1/me/settings', body: {'discoverable': on}))['discoverable'] as bool;
+
+  @override
   Future<bool> setRecordPersonalCalls(bool on) async =>
       (await _req('PATCH', '/v1/me/settings', body: {'record_personal_calls': on}))['record_personal_calls'] as bool;
 

@@ -28,7 +28,9 @@ def now_iso() -> str:
 class Store(ABC):
     @abstractmethod
     async def select(self, table: str, *, order: str | None = None, desc: bool = False,
-                     limit: int | None = None, in_: dict[str, list] | None = None, **eq: Any) -> list[Row]: ...
+                     limit: int | None = None, in_: dict[str, list] | None = None,
+                     contains: dict[str, str] | None = None, **eq: Any) -> list[Row]: ...
+    # contains: case-insensitive substring match per column (e.g. {"full_name": "ada"}).
 
     @abstractmethod
     async def insert(self, table: str, row: Row | list[Row]) -> list[Row]: ...
@@ -67,8 +69,10 @@ class MemoryStore(Store):
     def _t(self, table: str) -> list[Row]:
         return self.tables.setdefault(table, [])
 
-    async def select(self, table, *, order=None, desc=False, limit=None, in_=None, **eq):
+    async def select(self, table, *, order=None, desc=False, limit=None, in_=None, contains=None, **eq):
         rows = [r for r in self._t(table)
+                if all(str(v).lower() in str(r.get(k) or "").lower() for k, v in (contains or {}).items())]
+        rows = [r for r in rows
                 if all(r.get(k) == v for k, v in eq.items())
                 and all(r.get(k) in vs for k, vs in (in_ or {}).items())]
         if order:
@@ -128,8 +132,12 @@ class SupabaseStore(Store):
             params[k] = "in.(" + ",".join(str(v) for v in vs) + ")"
         return params
 
-    async def select(self, table, *, order=None, desc=False, limit=None, in_=None, **eq):
+    async def select(self, table, *, order=None, desc=False, limit=None, in_=None, contains=None, **eq):
         params = self._filters(eq, in_)
+        for k, v in (contains or {}).items():
+            # PostgREST ilike; strip characters that have meaning in its filter syntax.
+            safe = "".join(ch for ch in v if ch not in "*%,()\\\"")
+            params[k] = f"ilike.*{safe}*"
         params["select"] = "*"
         if order:
             params["order"] = f"{order}.{'desc' if desc else 'asc'}.nullslast"
