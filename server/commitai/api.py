@@ -10,6 +10,7 @@ import base64
 import hashlib
 import hmac
 import logging
+import secrets
 import time
 from collections import Counter, defaultdict, deque
 from contextlib import asynccontextmanager
@@ -24,7 +25,7 @@ from phonenumbers import PhoneNumberType
 from pydantic import BaseModel, Field
 
 from . import bot_runner
-from .auth import CurrentUser, InternalOnly, check_pin, mint_corp_session, read_corp_session
+from .auth import CurrentUser, InternalOnly, check_pin, hash_pin, mint_corp_session, read_corp_session
 from .config import settings
 from .daily import daily
 from .extractor import CATEGORIES, Segment, extract, merge_fragments
@@ -280,6 +281,7 @@ async def corporate_login(body: CorporateLogin, request: Request, user_id: str =
                                  "updated_at": now_iso()}, key="user_id")
     return {"corp_session": mint_corp_session(user_id, member["id"]),
             "membership": _public_member(member), "organization": org,
+            "must_change_pin": bool(member.get("must_change_pin")),
             "held_calls": await _held_calls(user_id)}
 
 
@@ -310,6 +312,330 @@ async def set_presence(body: PresenceBody, user_id: str = CurrentUser):
 async def _held_calls(user_id: str) -> list[dict]:
     rows = await db.select("calls", user_id=user_id, status="blocked_mode", order="started_at", desc=True, limit=20)
     return [{"id": r["id"], "from": r["counterpart_name"], "at": r["started_at"]} for r in rows]
+
+
+# ====================================================== company onboarding ======
+# Anyone can register a company (they become its admin). Admins add employees with a role,
+# title, department and manager; each gets an employee ID and a one-time PIN, or joins from an
+# email invite and picks their own PIN. First-time PINs must be changed after the first sign-in.
+
+PIN_RE = r"^\d{4,8}$"
+org_create_limiter = RateLimiter(5, 24 * 3600)
+
+
+def _temp_pin() -> str:
+    return f"{secrets.randbelow(10**6):06d}"
+
+
+def _clean_email(e: str | None) -> str | None:
+    e = (e or "").strip().lower()
+    return e or None
+
+
+async def _new_corp_code(name: str) -> str:
+    letters = "".join(ch for ch in name.upper() if ch.isalnum())[:8] or "TEAM"
+    if len(letters) < 3:
+        letters = (letters + "TEAM")[:4]
+    code = letters
+    while await db.get("organizations", corp_code=code):
+        code = f"{letters[:6]}{secrets.randbelow(90) + 10}"
+    return code
+
+
+async def _next_employee_id(org_id: str) -> str:
+    taken = {m["employee_id"] for m in await db.select("memberships", org_id=org_id)}
+    n = len(taken) + 1
+    while f"EMP-{n:04d}" in taken:
+        n += 1
+    return f"EMP-{n:04d}"
+
+
+async def require_admin(user_id: str) -> dict:
+    m = await active_membership(user_id)
+    if not m or not m.get("active"):
+        raise HTTPException(403, "Switch to Work mode first.")
+    if m["role"] != "admin":
+        raise HTTPException(403, "Only your company's admins can do this.")
+    return m
+
+
+async def _member_view(m: dict, profiles: dict | None = None, by_id: dict | None = None) -> dict:
+    prof = (profiles or {}).get(m.get("user_id")) if profiles is not None else (
+        await db.get("profiles", id=m["user_id"]) if m.get("user_id") else None)
+    mgr = (by_id or {}).get(m.get("manager_id")) if by_id is not None else (
+        await db.get("memberships", id=m["manager_id"]) if m.get("manager_id") else None)
+    return {
+        "id": m["id"], "employee_id": m["employee_id"], "role": m["role"],
+        "full_name": (prof or {}).get("full_name") or m.get("full_name") or m["employee_id"],
+        "email": (prof or {}).get("email") or m.get("invite_email"),
+        "title": m.get("title"), "department": m.get("department"),
+        "manager_id": m.get("manager_id"),
+        "manager_name": (mgr or {}).get("full_name") if mgr else None,
+        "active": bool(m.get("active", True)), "joined": bool(m.get("user_id")),
+        "must_change_pin": bool(m.get("must_change_pin")),
+    }
+
+
+class OrgCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    pin: str = Field(pattern=PIN_RE)                       # the admin's own Work-mode PIN
+    title: str | None = Field(default=None, max_length=80)
+    timezone: str = Field(default="Africa/Lagos", max_length=64)
+
+
+@app.post("/v1/orgs")
+async def create_org(body: OrgCreate, user_id: str = CurrentUser):
+    """Register a company. The creator becomes its first admin and is switched into Work mode."""
+    org_create_limiter.check(f"org:{user_id}")
+    org_create_limiter.hit(f"org:{user_id}")
+    prof = await db.get("profiles", id=user_id) or {}
+    org = (await db.insert("organizations", {
+        "name": body.name.strip(), "corp_code": await _new_corp_code(body.name), "timezone": body.timezone,
+    }))[0]
+    member = (await db.insert("memberships", {
+        "org_id": org["id"], "user_id": user_id, "employee_id": "EMP-0001", "pin_hash": hash_pin(body.pin),
+        "role": "admin", "title": body.title or "Admin", "full_name": prof.get("full_name"),
+        "invite_email": prof.get("email"), "active": True, "must_change_pin": False,
+    }))[0]
+    await db.upsert("presence", {"user_id": user_id, "mode": "corporate", "membership_id": member["id"],
+                                 "updated_at": now_iso()}, key="user_id")
+    log.info("company %s (%s) registered by %s", org["name"], org["corp_code"], user_id)
+    return {"corp_session": mint_corp_session(user_id, member["id"]),
+            "membership": _public_member(member), "organization": org, "held_calls": []}
+
+
+class OrgPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=120)
+    timezone: str | None = Field(default=None, max_length=64)
+    recording_disclosure: str | None = Field(default=None, min_length=10, max_length=300)
+    announce_recording: bool | None = None
+    off_duty_policy: Literal["ring", "voicemail"] | None = None
+
+
+@app.get("/v1/org")
+async def get_org(user_id: str = CurrentUser):
+    m = await require_membership(user_id)
+    org = await db.get("organizations", id=m["org_id"])
+    members = await db.select("memberships", org_id=m["org_id"])
+    return {"organization": org, "role": m["role"],
+            "counts": {"members": sum(1 for x in members if x.get("active", True)),
+                       "joined": sum(1 for x in members if x.get("user_id") and x.get("active", True)),
+                       "admins": sum(1 for x in members if x["role"] == "admin" and x.get("active", True))}}
+
+
+@app.patch("/v1/org")
+async def update_org(body: OrgPatch, user_id: str = CurrentUser):
+    m = await require_admin(user_id)
+    patch = body.model_dump(exclude_none=True)
+    if patch:
+        await db.update("organizations", patch, id=m["org_id"])
+    return await db.get("organizations", id=m["org_id"])
+
+
+@app.get("/v1/org/members")
+async def list_members(user_id: str = CurrentUser):
+    """Admins see everyone; managers see their own reporting line."""
+    m = await require_membership(user_id)
+    rows = await db.select("memberships", org_id=m["org_id"])
+    if m["role"] != "admin":
+        visible = await visible_member_ids(m)
+        rows = [r for r in rows if r["id"] in visible]
+    uids = [r["user_id"] for r in rows if r.get("user_id")]
+    profiles = {p["id"]: p for p in (await db.select("profiles", in_={"id": uids}) if uids else [])}
+    by_id = {r["id"]: {**r, "full_name": (profiles.get(r.get("user_id")) or {}).get("full_name") or r.get("full_name")}
+             for r in await db.select("memberships", org_id=m["org_id"])}
+    out = [await _member_view(r, profiles, by_id) for r in rows]
+    order = {"admin": 0, "manager": 1, "employee": 2}
+    return sorted(out, key=lambda x: (not x["active"], order.get(x["role"], 3), x["full_name"].lower()))
+
+
+class MemberIn(BaseModel):
+    full_name: str = Field(min_length=1, max_length=120)
+    email: str | None = Field(default=None, max_length=254)
+    role: Literal["employee", "manager", "admin"] = "employee"
+    title: str | None = Field(default=None, max_length=80)
+    department: str | None = Field(default=None, max_length=80)
+    manager_id: str | None = Field(default=None, max_length=64)
+    employee_id: str | None = Field(default=None, max_length=64)
+
+
+async def _add_member(admin: dict, body: MemberIn) -> dict:
+    email = _clean_email(body.email)
+    if email and "@" not in email:
+        raise HTTPException(422, f"“{body.email}” isn't an email address.")
+    existing = await db.select("memberships", org_id=admin["org_id"])
+    if email and any((x.get("invite_email") or "").lower() == email for x in existing):
+        raise HTTPException(409, f"{email} is already on your team.")
+    emp = (body.employee_id or "").strip().upper() or await _next_employee_id(admin["org_id"])
+    if any(x["employee_id"] == emp for x in existing):
+        raise HTTPException(409, f"Employee ID {emp} is already used.")
+    if body.manager_id and not any(x["id"] == body.manager_id for x in existing):
+        raise HTTPException(422, "That manager isn't in your company.")
+    pin = _temp_pin()
+    row = (await db.insert("memberships", {
+        "org_id": admin["org_id"], "employee_id": emp, "pin_hash": hash_pin(pin), "role": body.role,
+        "full_name": body.full_name.strip(), "invite_email": email,
+        "title": (body.title or "").strip() or None, "department": (body.department or "").strip() or None,
+        "manager_id": body.manager_id, "active": True, "must_change_pin": True,
+    }))[0]
+    return {"member": await _member_view(row), "temp_pin": pin}
+
+
+@app.post("/v1/org/members")
+async def add_member(body: MemberIn, user_id: str = CurrentUser):
+    admin = await require_admin(user_id)
+    org = await db.get("organizations", id=admin["org_id"])
+    return {**await _add_member(admin, body), "corp_code": org["corp_code"]}
+
+
+class MembersBulk(BaseModel):
+    members: list[MemberIn] = Field(min_length=1, max_length=500)
+
+
+@app.post("/v1/org/members/bulk")
+async def add_members_bulk(body: MembersBulk, user_id: str = CurrentUser):
+    """Add a whole list at once (e.g. pasted from a spreadsheet). Each row succeeds or fails alone."""
+    admin = await require_admin(user_id)
+    org = await db.get("organizations", id=admin["org_id"])
+    results = []
+    for row in body.members:
+        try:
+            results.append({"ok": True, **await _add_member(admin, row)})
+        except HTTPException as e:
+            results.append({"ok": False, "full_name": row.full_name, "error": e.detail})
+    return {"corp_code": org["corp_code"], "results": results}
+
+
+class MemberPatch(BaseModel):
+    full_name: str | None = Field(default=None, min_length=1, max_length=120)
+    email: str | None = Field(default=None, max_length=254)
+    role: Literal["employee", "manager", "admin"] | None = None
+    title: str | None = Field(default=None, max_length=80)
+    department: str | None = Field(default=None, max_length=80)
+    manager_id: str | None = Field(default=None, max_length=64)   # "" clears it
+    active: bool | None = None
+
+
+@app.patch("/v1/org/members/{member_id}")
+async def update_member(member_id: str, body: MemberPatch, user_id: str = CurrentUser):
+    admin = await require_admin(user_id)
+    target = await db.get("memberships", id=member_id)
+    if not target or target["org_id"] != admin["org_id"]:
+        raise HTTPException(404, "member not found")
+    patch = body.model_dump(exclude_unset=True)
+    if "email" in patch:
+        patch["invite_email"] = _clean_email(patch.pop("email"))
+    if "manager_id" in patch:
+        mgr = patch["manager_id"] or None
+        patch["manager_id"] = mgr
+        if mgr:
+            members = {m["id"]: m for m in await db.select("memberships", org_id=admin["org_id"])}
+            if mgr not in members:
+                raise HTTPException(422, "That manager isn't in your company.")
+            seen, cur = set(), mgr                       # no reporting loops (A → B → A)
+            while cur:
+                if cur == member_id:
+                    raise HTTPException(422, "That would make a reporting loop.")
+                if cur in seen:
+                    break
+                seen.add(cur)
+                cur = members.get(cur, {}).get("manager_id")
+    losing_admin = target["role"] == "admin" and (
+        patch.get("role") not in (None, "admin") or patch.get("active") is False)
+    if losing_admin:
+        admins = [m for m in await db.select("memberships", org_id=admin["org_id"], role="admin") if m.get("active", True)]
+        if len(admins) <= 1:
+            raise HTTPException(422, "A company needs at least one admin. Make someone else an admin first.")
+    for k in ("title", "department"):
+        if k in patch and patch[k] is not None:
+            patch[k] = patch[k].strip() or None
+    if patch:
+        target = (await db.update("memberships", patch, id=member_id))[0]
+    if patch.get("active") is False and target.get("user_id"):
+        # Deactivated: drop them out of Work mode right away.
+        p = await db.get("presence", user_id=target["user_id"])
+        if p and p.get("membership_id") == member_id:
+            await db.upsert("presence", {"user_id": target["user_id"], "mode": "personal", "membership_id": None,
+                                         "updated_at": now_iso()}, key="user_id")
+    return await _member_view(target)
+
+
+class ResetPin(BaseModel):
+    unlink_account: bool = False      # they're moving to a new account / phone
+
+
+@app.post("/v1/org/members/{member_id}/reset-pin")
+async def reset_member_pin(member_id: str, body: ResetPin, user_id: str = CurrentUser):
+    admin = await require_admin(user_id)
+    target = await db.get("memberships", id=member_id)
+    if not target or target["org_id"] != admin["org_id"]:
+        raise HTTPException(404, "member not found")
+    pin = _temp_pin()
+    patch = {"pin_hash": hash_pin(pin), "must_change_pin": True}
+    if body.unlink_account:
+        patch["user_id"] = None
+    row = (await db.update("memberships", patch, id=member_id))[0]
+    org = await db.get("organizations", id=admin["org_id"])
+    return {"member": await _member_view(row), "temp_pin": pin, "corp_code": org["corp_code"]}
+
+
+@app.get("/v1/me/invites")
+async def my_invites(user_id: str = CurrentUser):
+    """Companies that added this user's email and are waiting for them to join."""
+    prof = await db.get("profiles", id=user_id) or {}
+    email = _clean_email(prof.get("email"))
+    if not email:
+        return []
+    out = []
+    for m in await db.select("memberships", invite_email=email):
+        if m.get("user_id") or not m.get("active", True):
+            continue
+        org = await db.get("organizations", id=m["org_id"])
+        if org:
+            out.append({"membership_id": m["id"], "organization": org["name"], "corp_code": org["corp_code"],
+                        "employee_id": m["employee_id"], "role": m["role"], "title": m.get("title")})
+    return out
+
+
+class JoinBody(BaseModel):
+    membership_id: str = Field(max_length=64)
+    pin: str = Field(pattern=PIN_RE)
+
+
+@app.post("/v1/org/join")
+async def join_org(body: JoinBody, user_id: str = CurrentUser):
+    """Accept an email invite: link the account and set your own PIN (no codes to type)."""
+    prof = await db.get("profiles", id=user_id) or {}
+    m = await db.get("memberships", id=body.membership_id)
+    if (not m or m.get("user_id") or not m.get("active", True)
+            or (m.get("invite_email") or "").lower() != (_clean_email(prof.get("email")) or "-")):
+        raise HTTPException(404, "That invite isn't available any more. Ask your admin.")
+    m = (await db.update("memberships", {"user_id": user_id, "pin_hash": hash_pin(body.pin),
+                                         "must_change_pin": False}, id=m["id"]))[0]
+    await db.upsert("presence", {"user_id": user_id, "mode": "corporate", "membership_id": m["id"],
+                                 "updated_at": now_iso()}, key="user_id")
+    org = await db.get("organizations", id=m["org_id"])
+    return {"corp_session": mint_corp_session(user_id, m["id"]), "membership": _public_member(m),
+            "organization": org, "held_calls": await _held_calls(user_id)}
+
+
+class PinChange(BaseModel):
+    current_pin: str = Field(min_length=1, max_length=12)
+    new_pin: str = Field(pattern=PIN_RE)
+
+
+@app.post("/v1/corporate/pin")
+async def change_pin(body: PinChange, request: Request, user_id: str = CurrentUser):
+    m = await require_membership(user_id)
+    keys = (f"user:{user_id}", f"ip:{client_ip(request)}")
+    login_limiter.check(*keys)
+    if not check_pin(body.current_pin, m.get("pin_hash")):
+        login_limiter.hit(*keys)
+        raise HTTPException(401, "Your current PIN is incorrect.")
+    if body.new_pin == body.current_pin:
+        raise HTTPException(422, "Choose a PIN different from the current one.")
+    await db.update("memberships", {"pin_hash": hash_pin(body.new_pin), "must_change_pin": False}, id=m["id"])
+    return {"ok": True}
 
 
 class DeviceBody(BaseModel):

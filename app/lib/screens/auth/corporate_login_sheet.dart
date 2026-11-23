@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../app.dart' show navigatorKey;
 import '../../core/theme.dart';
+import '../../models/models.dart';
 import '../../state/app_state.dart';
+import '../team/company_screens.dart';
 
 /// Corporate sign-in: company code + employee ID + PIN on a custom keypad.
 /// Returns true when the user is now in Work mode.
@@ -30,8 +33,30 @@ class _CorporateLoginSheetState extends State<_CorporateLoginSheet> {
   bool _busy = false;
   String? _error;
   bool _onPin = false;
+  late final Future<List<OrgInvite>> _invites = AppScope.read(context).backend!.invites().catchError((_) => <OrgInvite>[]);
+
+  /// After entering Work mode: a one-time PIN from the admin must be replaced straight away.
+  void _afterWork() {
+    final app = AppScope.read(context);
+    Navigator.pop(context, true);
+    final ctx = navigatorKey.currentContext;
+    if (ctx != null && (app.session?.membership?.mustChangePin ?? false)) {
+      showChangePin(ctx, forced: true);
+    }
+  }
+
+  Future<void> _join(OrgInvite invite) async {
+    if (await showJoinInvite(context, invite) && mounted) _afterWork();
+  }
+
+  Future<void> _register() async {
+    if (!await showRegisterCompany(context) || !mounted) return;
+    Navigator.pop(context, true);
+    navigatorKey.currentState?.push(MaterialPageRoute(builder: (_) => const TeamAdminScreen(welcome: true)));
+  }
 
   Future<void> _submit() async {
+    if (_pin.length < 4 || _busy) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -40,7 +65,7 @@ class _CorporateLoginSheetState extends State<_CorporateLoginSheet> {
     if (!mounted) return;
     if (err == null) {
       HapticFeedback.mediumImpact();
-      Navigator.pop(context, true);
+      _afterWork();
     } else {
       HapticFeedback.heavyImpact();
       setState(() {
@@ -57,11 +82,10 @@ class _CorporateLoginSheetState extends State<_CorporateLoginSheet> {
     setState(() {
       if (k == '⌫') {
         if (_pin.isNotEmpty) _pin = _pin.substring(0, _pin.length - 1);
-      } else if (_pin.length < 4) {
+      } else if (_pin.length < 8) {
         _pin += k;
       }
     });
-    if (_pin.length == 4 && k != '⌫') _submit();
   }
 
   @override
@@ -94,6 +118,32 @@ class _CorporateLoginSheetState extends State<_CorporateLoginSheet> {
               ]),
               const SizedBox(height: 22),
               if (!_onPin) ...[
+                FutureBuilder<List<OrgInvite>>(
+                  future: _invites,
+                  builder: (context, snap) => Column(children: [
+                    for (final i in snap.data ?? const <OrgInvite>[])
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 14),
+                        child: Material(
+                          color: p.accentSoft,
+                          borderRadius: BorderRadius.circular(16),
+                          child: ListTile(
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            leading: Icon(Icons.mark_email_unread_rounded, color: p.accent),
+                            title: Text('You’ve been added to ${i.organization}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                            subtitle: Text('${i.title ?? 'Team member'} · tap to join, no codes needed'),
+                            trailing: FilledButton(onPressed: () => _join(i), child: const Text('Join')),
+                            onTap: () => _join(i),
+                          ),
+                        ),
+                      ),
+                    if ((snap.data ?? const []).isNotEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 12),
+                        child: Text('or sign in with your company code', style: TextStyle(color: AppColors.textDim, fontSize: 13)),
+                      ),
+                  ]),
+                ),
                 TextField(
                   controller: _code,
                   autofocus: true,
@@ -124,6 +174,12 @@ class _CorporateLoginSheetState extends State<_CorporateLoginSheet> {
                   },
                   child: const Text('Continue'),
                 ),
+                const SizedBox(height: 6),
+                TextButton.icon(
+                  onPressed: _register,
+                  icon: const Icon(Icons.domain_add_rounded, size: 18),
+                  label: const Text('New company? Register it here'),
+                ),
               ] else ...[
                 Center(child: Text('${_code.text.toUpperCase()} · ${_emp.text.toUpperCase()}', style: t.bodyMedium)),
                 const SizedBox(height: 14),
@@ -131,7 +187,7 @@ class _CorporateLoginSheetState extends State<_CorporateLoginSheet> {
                 const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(4, (i) {
+                  children: List.generate(_pin.length < 4 ? 4 : _pin.length, (i) {
                     final filled = i < _pin.length;
                     return AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
@@ -149,6 +205,8 @@ class _CorporateLoginSheetState extends State<_CorporateLoginSheet> {
                 const SizedBox(height: 18),
                 if (_busy) const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator())),
                 _Keypad(onKey: _key),
+                const SizedBox(height: 10),
+                FilledButton(onPressed: _pin.length >= 4 && !_busy ? _submit : null, child: const Text('Sign in')),
                 TextButton(onPressed: () => setState(() => _onPin = false), child: const Text('Change company or ID')),
               ],
               if (_error != null) ...[

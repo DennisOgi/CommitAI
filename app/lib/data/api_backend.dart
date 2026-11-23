@@ -155,6 +155,66 @@ class ApiBackend extends Backend {
   Future<void> registerDevice(String platform, String? pushToken) =>
       _req('POST', '/v1/devices', body: {'platform': platform, 'push_token': pushToken});
 
+  Future<CorporateLoginResult> _corp(Map<String, dynamic> j) async => (
+        corpSession: j['corp_session'] as String,
+        session: await me(),
+        held: [for (final h in (j['held_calls'] as List? ?? const [])) HeldCall.fromJson(h)],
+      );
+
+  @override
+  Future<CorporateLoginResult> createCompany({required String name, required String pin, String? title}) async =>
+      _corp(await _req('POST', '/v1/orgs', body: {'name': name, 'pin': pin, if (title != null && title.isNotEmpty) 'title': title}));
+
+  @override
+  Future<List<OrgInvite>> invites() async => [for (final j in await _req('GET', '/v1/me/invites')) OrgInvite.fromJson(j)];
+
+  @override
+  Future<CorporateLoginResult> joinCompany(String membershipId, String pin) async =>
+      _corp(await _req('POST', '/v1/org/join', body: {'membership_id': membershipId, 'pin': pin}));
+
+  @override
+  Future<void> changeWorkPin(String currentPin, String newPin) =>
+      _req('POST', '/v1/corporate/pin', body: {'current_pin': currentPin, 'new_pin': newPin});
+
+  @override
+  Future<OrgOverview> orgOverview() async => OrgOverview.fromJson(await _req('GET', '/v1/org'));
+
+  @override
+  Future<void> updateOrg(Map<String, dynamic> patch) => _req('PATCH', '/v1/org', body: patch);
+
+  @override
+  Future<List<OrgMember>> orgMembers() async => [for (final j in await _req('GET', '/v1/org/members')) OrgMember.fromJson(j)];
+
+  MemberCredentials _creds(Map<String, dynamic> j, String corpCode) =>
+      MemberCredentials(member: OrgMember.fromJson(j['member']), corpCode: corpCode, tempPin: j['temp_pin']);
+
+  @override
+  Future<MemberCredentials> addMember(Map<String, dynamic> member) async {
+    final j = await _req('POST', '/v1/org/members', body: member);
+    return _creds(j, j['corp_code']);
+  }
+
+  @override
+  Future<List<(MemberCredentials?, String?, String)>> addMembers(List<Map<String, dynamic>> members) async {
+    final j = await _req('POST', '/v1/org/members/bulk', body: {'members': members});
+    return [
+      for (final r in j['results'] as List)
+        r['ok'] == true
+            ? (_creds(r, j['corp_code']), null, r['member']['full_name'] as String)
+            : (null, '${r['error']}', '${r['full_name']}')
+    ];
+  }
+
+  @override
+  Future<OrgMember> updateMember(String id, Map<String, dynamic> patch) async =>
+      OrgMember.fromJson(await _req('PATCH', '/v1/org/members/$id', body: patch));
+
+  @override
+  Future<MemberCredentials> resetMemberPin(String id, {bool unlinkAccount = false}) async {
+    final j = await _req('POST', '/v1/org/members/$id/reset-pin', body: {'unlink_account': unlinkAccount});
+    return _creds(j, j['corp_code']);
+  }
+
   @override
   Future<List<PlatformUser>> searchUsers(String q) async =>
       [for (final u in await _req('GET', '/v1/users/search', query: {'q': q})) PlatformUser.fromJson(u)];

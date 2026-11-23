@@ -69,6 +69,14 @@ mode is on, personal calls are held, not rung.
 - **Deadline reminders on the phone:** a day before and 2 hours before every dated commitment, scheduled
   on the device so they arrive even when the app is closed and without push set up; plus a "deadline
   passed" notice. (With push configured, the server sends the same reminders by push too.)
+- **Company registration & onboarding**: anyone can register a company from the app (Work sign-in
+  sheet → "New company? Register it", or the menu) and becomes its admin with a company code. Admins open
+  **Team & company** to add people one at a time or by pasting a list from a spreadsheet, set each
+  person's role (employee / manager / admin), title, department and who they report to, reset PINs,
+  deactivate leavers and change company settings (recording announcement, off-duty ringing). Each new
+  person gets an employee ID and a one-time PIN to share; if the admin added their email, they can
+  instead tap **Join** when they sign up and choose their own PIN. One-time PINs must be changed after the
+  first sign-in. Managers see their reporting line; admins see everyone.
 - **Find anyone on Commit AI**: app-to-app calls aren't limited to your company. Anyone with an
   account can search by name (or exact email) from the Contacts search box, call them for free, and
   save them as a contact. Emails are shown masked; "Let people find me" (menu) hides you from name
@@ -465,6 +473,13 @@ All `/v1` endpoints take `Authorization: Bearer <Supabase access token>`.
 | `POST /v1/presence` | switch Personal / Work |
 | `POST /v1/devices` | register a push token |
 | `GET/POST /v1/contacts` | contacts (Personal) or company clients (Work); add by phone and/or email |
+| `POST /v1/orgs` | register a company (caller becomes admin, enters Work mode) |
+| `GET/PATCH /v1/org` | company settings and head-count (PATCH: admin) |
+| `GET /v1/org/members` | the team (admin: everyone; manager: their reporting line) |
+| `POST /v1/org/members`, `/v1/org/members/bulk` | add people; returns employee ID + one-time PIN |
+| `PATCH /v1/org/members/{id}`, `POST …/{id}/reset-pin` | role, title, manager, deactivate; new one-time PIN |
+| `GET /v1/me/invites`, `POST /v1/org/join` | email invites; join with your own PIN |
+| `POST /v1/corporate/pin` | change your Work PIN |
 | `GET /v1/users/search?q=` | find people on Commit AI by name (2+ chars) or exact email |
 | `POST /v1/contacts/import` | import the phone's address book into personal contacts |
 | `PATCH /v1/me/settings` | e.g. `record_personal_calls` |

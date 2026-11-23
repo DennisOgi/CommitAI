@@ -8,6 +8,7 @@ import '../../state/app_state.dart';
 import '../../widgets/common.dart';
 import '../auth/corporate_login_sheet.dart';
 import '../commitments/commitments_screen.dart';
+import '../team/company_screens.dart';
 import '../team/dashboard_screen.dart';
 import 'contacts_screen.dart';
 import 'keypad_screen.dart';
@@ -106,89 +107,123 @@ class _HomeShellState extends State<HomeShell> {
     final demo = app.backend;
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       builder: (sheet) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            leading: Avatar(name: app.session!.profile.fullName, size: 40),
-            title: Text(app.session!.profile.fullName),
-            subtitle: Text(app.corporate
-                ? '${app.session!.membership?.title ?? ''} · ${app.session!.organization?.name ?? ''} · ${app.session!.membership?.employeeId ?? ''}'
-                : 'Personal profile'),
-          ),
-          if (app.corporate && app.session!.membership?.corporateDid != null)
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
             ListTile(
-              leading: const Icon(Icons.phone_in_talk_rounded),
-              title: const Text('Your work number'),
-              subtitle: Text(prettyPhone(app.session!.membership!.corporateDid)),
+              leading: Avatar(name: app.session!.profile.fullName, size: 40),
+              title: Text(app.session!.profile.fullName),
+              subtitle: Text(app.corporate
+                  ? '${app.session!.membership?.title ?? ''} · ${app.session!.organization?.name ?? ''} · ${app.session!.membership?.employeeId ?? ''}'
+                  : 'Personal profile'),
             ),
-          if (demo is DemoBackend) ...[
+            if (app.corporate && (app.session!.membership?.isAdmin ?? false))
+              ListTile(
+                leading: const Icon(Icons.groups_rounded),
+                title: const Text('Team & company'),
+                subtitle: const Text('Add people, roles, who reports to whom'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TeamAdminScreen()));
+                },
+              ),
+            if (app.corporate)
+              ListTile(
+                leading: const Icon(Icons.lock_reset_rounded),
+                title: const Text('Change Work PIN'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  showChangePin(context);
+                },
+              ),
+            if (!app.corporate && !app.isDemo)
+              ListTile(
+                leading: const Icon(Icons.domain_add_rounded),
+                title: const Text('Register your company'),
+                subtitle: const Text('Bring your team onto Commit AI'),
+                onTap: () async {
+                  Navigator.pop(sheet);
+                  if (await showRegisterCompany(context) && mounted) {
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TeamAdminScreen(welcome: true)));
+                  }
+                },
+              ),
+            if (app.corporate && app.session!.membership?.corporateDid != null)
+              ListTile(
+                leading: const Icon(Icons.phone_in_talk_rounded),
+                title: const Text('Your work number'),
+                subtitle: Text(prettyPhone(app.session!.membership!.corporateDid)),
+              ),
+            if (demo is DemoBackend) ...[
+              const Divider(),
+              const SectionLabel('Demo tools', padding: EdgeInsets.fromLTRB(20, 12, 20, 4)),
+              ListTile(
+                leading: const Icon(Icons.business_rounded),
+                title: const Text('Simulate a call from a client'),
+                subtitle: const Text('Bello Foods calls your work line'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  final msg = demo.simulateIncoming(fromClient: true);
+                  if (msg != null) {
+                    toast(context, msg, icon: Icons.voicemail_rounded);
+                    app.refresh();
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.emoji_people_rounded),
+                title: const Text('Simulate a call from a friend'),
+                subtitle: const Text('Chidi calls you app-to-app'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  final msg = demo.simulateIncoming(fromClient: false);
+                  if (msg != null) {
+                    toast(context, msg, icon: Icons.do_not_disturb_on_rounded);
+                    app.refresh();
+                  }
+                },
+              ),
+            ],
             const Divider(),
-            const SectionLabel('Demo tools', padding: EdgeInsets.fromLTRB(20, 12, 20, 4)),
+            StatefulBuilder(
+              builder: (context, setSheet) => SwitchListTile(
+                secondary: const Icon(Icons.fiber_manual_record_rounded),
+                title: const Text('Record my personal calls'),
+                subtitle: const Text('Recorded only temporarily to find your commitments, then deleted. Never shared with your company.'),
+                value: app.recordsPersonalCalls,
+                onChanged: (v) async {
+                  final err = await app.setRecordPersonalCalls(v);
+                  setSheet(() {});
+                  if (err != null && context.mounted) toast(context, err, icon: Icons.error_outline_rounded);
+                },
+              ),
+            ),
+            StatefulBuilder(
+              builder: (context, setSheet) => SwitchListTile(
+                secondary: const Icon(Icons.travel_explore_rounded),
+                title: const Text('Let people find me'),
+                subtitle: const Text('Anyone on Commit AI can search your name and call you. '
+                    'Off: only people who know your email can.'),
+                value: app.discoverable,
+                onChanged: (v) async {
+                  final err = await app.setDiscoverable(v);
+                  setSheet(() {});
+                  if (err != null && context.mounted) toast(context, err, icon: Icons.error_outline_rounded);
+                },
+              ),
+            ),
+            const Divider(),
             ListTile(
-              leading: const Icon(Icons.business_rounded),
-              title: const Text('Simulate a call from a client'),
-              subtitle: const Text('Bello Foods calls your work line'),
+              leading: const Icon(Icons.logout_rounded, color: AppColors.danger),
+              title: const Text('Sign out', style: TextStyle(color: AppColors.danger)),
               onTap: () {
                 Navigator.pop(sheet);
-                final msg = demo.simulateIncoming(fromClient: true);
-                if (msg != null) {
-                  toast(context, msg, icon: Icons.voicemail_rounded);
-                  app.refresh();
-                }
+                app.signOut();
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.emoji_people_rounded),
-              title: const Text('Simulate a call from a friend'),
-              subtitle: const Text('Chidi calls you app-to-app'),
-              onTap: () {
-                Navigator.pop(sheet);
-                final msg = demo.simulateIncoming(fromClient: false);
-                if (msg != null) {
-                  toast(context, msg, icon: Icons.do_not_disturb_on_rounded);
-                  app.refresh();
-                }
-              },
-            ),
-          ],
-          const Divider(),
-          StatefulBuilder(
-            builder: (context, setSheet) => SwitchListTile(
-              secondary: const Icon(Icons.fiber_manual_record_rounded),
-              title: const Text('Record my personal calls'),
-              subtitle: const Text('Recorded only temporarily to find your commitments, then deleted. Never shared with your company.'),
-              value: app.recordsPersonalCalls,
-              onChanged: (v) async {
-                final err = await app.setRecordPersonalCalls(v);
-                setSheet(() {});
-                if (err != null && context.mounted) toast(context, err, icon: Icons.error_outline_rounded);
-              },
-            ),
-          ),
-          StatefulBuilder(
-            builder: (context, setSheet) => SwitchListTile(
-              secondary: const Icon(Icons.travel_explore_rounded),
-              title: const Text('Let people find me'),
-              subtitle: const Text('Anyone on Commit AI can search your name and call you. '
-                  'Off: only people who know your email can.'),
-              value: app.discoverable,
-              onChanged: (v) async {
-                final err = await app.setDiscoverable(v);
-                setSheet(() {});
-                if (err != null && context.mounted) toast(context, err, icon: Icons.error_outline_rounded);
-              },
-            ),
-          ),
-          const Divider(),
-          ListTile(
-            leading: const Icon(Icons.logout_rounded, color: AppColors.danger),
-            title: const Text('Sign out', style: TextStyle(color: AppColors.danger)),
-            onTap: () {
-              Navigator.pop(sheet);
-              app.signOut();
-            },
-          ),
-        ]),
+          ]),
+        ),
       ),
     );
   }

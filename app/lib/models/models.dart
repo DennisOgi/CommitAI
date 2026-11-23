@@ -84,6 +84,7 @@ class Membership {
     this.title,
     this.department,
     this.corporateDid,
+    this.mustChangePin = false,
   });
   final String id;
   final String orgId;
@@ -92,6 +93,11 @@ class Membership {
   final String? title;
   final String? department;
   final String? corporateDid;
+
+  /// Signed in with a one-time PIN from the admin: must choose their own.
+  bool mustChangePin;
+
+  bool get isAdmin => role == MemberRole.admin;
 
   bool get isManager => role != MemberRole.employee;
 
@@ -103,6 +109,104 @@ class Membership {
         title: j['title'],
         department: j['department'],
         corporateDid: j['corporate_did'],
+        mustChangePin: j['must_change_pin'] ?? false,
+      );
+}
+
+/// Someone on the company's team, as the admin manages them.
+class OrgMember {
+  OrgMember({
+    required this.id,
+    required this.employeeId,
+    required this.role,
+    required this.fullName,
+    this.email,
+    this.title,
+    this.department,
+    this.managerId,
+    this.managerName,
+    this.active = true,
+    this.joined = false,
+    this.mustChangePin = false,
+  });
+  final String id;
+  final String employeeId;
+  final MemberRole role;
+  final String fullName;
+  final String? email;
+  final String? title;
+  final String? department;
+  final String? managerId;
+  final String? managerName;
+  final bool active;
+  final bool joined;
+  final bool mustChangePin;
+
+  factory OrgMember.fromJson(Map<String, dynamic> j) => OrgMember(
+        id: j['id'],
+        employeeId: j['employee_id'] ?? '',
+        role: _enum(MemberRole.values, j['role'], MemberRole.employee),
+        fullName: j['full_name'] ?? j['employee_id'] ?? '',
+        email: j['email'],
+        title: j['title'],
+        department: j['department'],
+        managerId: j['manager_id'],
+        managerName: j['manager_name'],
+        active: j['active'] ?? true,
+        joined: j['joined'] ?? false,
+        mustChangePin: j['must_change_pin'] ?? false,
+      );
+}
+
+/// What an employee needs to sign in for the first time: shown once to the admin to pass on.
+class MemberCredentials {
+  MemberCredentials({required this.member, required this.corpCode, required this.tempPin});
+  final OrgMember member;
+  final String corpCode;
+  final String tempPin;
+
+  String get shareText => 'You\'ve been added to Commit AI.\n'
+      '1. Install Commit AI and create your account${member.email != null ? ' with ${member.email}' : ''}.\n'
+      '2. Tap Work and sign in with:\n'
+      '   Company code: $corpCode\n'
+      '   Employee ID: ${member.employeeId}\n'
+      '   One-time PIN: $tempPin\n'
+      'You\'ll choose your own PIN after signing in.';
+}
+
+/// A company that added this user's email and is waiting for them to join.
+class OrgInvite {
+  OrgInvite({required this.membershipId, required this.organization, required this.employeeId, required this.role, this.title});
+  final String membershipId;
+  final String organization;
+  final String employeeId;
+  final MemberRole role;
+  final String? title;
+
+  factory OrgInvite.fromJson(Map<String, dynamic> j) => OrgInvite(
+        membershipId: j['membership_id'],
+        organization: j['organization'] ?? '',
+        employeeId: j['employee_id'] ?? '',
+        role: _enum(MemberRole.values, j['role'], MemberRole.employee),
+        title: j['title'],
+      );
+}
+
+/// Company settings and head-count, for the admin screen.
+class OrgOverview {
+  OrgOverview({required this.org, required this.members, required this.joined, required this.offDutyRings, required this.announce});
+  final Organization org;
+  final int members;
+  final int joined;
+  final bool offDutyRings;
+  final bool announce;
+
+  factory OrgOverview.fromJson(Map<String, dynamic> j) => OrgOverview(
+        org: Organization.fromJson(j['organization']),
+        members: (j['counts']?['members'] ?? 0) as int,
+        joined: (j['counts']?['joined'] ?? 0) as int,
+        offDutyRings: j['organization']['off_duty_policy'] == 'ring',
+        announce: j['organization']['announce_recording'] ?? true,
       );
 }
 

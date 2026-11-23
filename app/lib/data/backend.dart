@@ -52,6 +52,24 @@ abstract class Backend {
   /// The employee flagged a moment of a live work call as a commitment.
   Future<void> flagMoment(String callId, int offsetMs) async {}
 
+  // ---- Company onboarding (not available in the demo) ----
+  Never _noDemo() => throw UnsupportedError('Not available in the demo.');
+
+  /// Register a company; the user becomes its admin and is switched to Work mode.
+  Future<CorporateLoginResult> createCompany({required String name, required String pin, String? title}) async => _noDemo();
+  Future<List<OrgInvite>> invites() async => [];
+  Future<CorporateLoginResult> joinCompany(String membershipId, String pin) async => _noDemo();
+  Future<void> changeWorkPin(String currentPin, String newPin) async => _noDemo();
+  Future<OrgOverview> orgOverview() async => _noDemo();
+  Future<void> updateOrg(Map<String, dynamic> patch) async => _noDemo();
+  Future<List<OrgMember>> orgMembers() async => [];
+  Future<MemberCredentials> addMember(Map<String, dynamic> member) async => _noDemo();
+
+  /// Each result is either credentials or an error message for that row.
+  Future<List<(MemberCredentials?, String?, String)>> addMembers(List<Map<String, dynamic>> members) async => _noDemo();
+  Future<OrgMember> updateMember(String id, Map<String, dynamic> patch) async => _noDemo();
+  Future<MemberCredentials> resetMemberPin(String id, {bool unlinkAccount = false}) async => _noDemo();
+
   /// People on Commit AI matching a name (2+ letters) or an exact email.
   Future<List<PlatformUser>> searchUsers(String q) async => [];
 

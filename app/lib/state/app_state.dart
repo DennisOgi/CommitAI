@@ -338,9 +338,32 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<String?> corporateLogin(String code, String employeeId, String pin) async {
+  Future<String?> corporateLogin(String code, String employeeId, String pin) =>
+      _enterWork(() => backend!.corporateLogin(code, employeeId, pin));
+
+  /// Register a company: the user becomes its admin, in Work mode.
+  Future<String?> createCompany({required String name, required String pin, String? title}) =>
+      _enterWork(() => backend!.createCompany(name: name, pin: pin, title: title));
+
+  /// Accept an email invite with a PIN of the user's choosing.
+  Future<String?> joinCompany(String membershipId, String pin) => _enterWork(() => backend!.joinCompany(membershipId, pin));
+
+  Future<String?> changeWorkPin(String currentPin, String newPin) async {
     try {
-      final r = await backend!.corporateLogin(code, employeeId, pin);
+      await backend!.changeWorkPin(currentPin, newPin);
+      session?.membership?.mustChangePin = false;
+      notifyListeners();
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+  Future<String?> _enterWork(Future<CorporateLoginResult> Function() go) async {
+    try {
+      final r = await go();
       _corpSession = r.corpSession;
       await _writeCorp(r.corpSession);
       session = r.session;
@@ -349,6 +372,8 @@ class AppState extends ChangeNotifier {
       return null;
     } on ApiException catch (e) {
       return e.message;
+    } on UnsupportedError catch (e) {
+      return e.message ?? 'Not available in the demo.';
     } catch (e) {
       return e.toString();
     }
