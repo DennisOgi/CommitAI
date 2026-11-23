@@ -6,6 +6,7 @@ import '../../data/demo_backend.dart';
 import '../../models/models.dart';
 import '../../state/app_state.dart';
 import '../../widgets/common.dart';
+import '../../widgets/phone_sheet.dart';
 import '../auth/corporate_login_sheet.dart';
 import '../commitments/commitments_screen.dart';
 import '../team/company_screens.dart';
@@ -118,7 +119,16 @@ class _HomeShellState extends State<HomeShell> {
                   ? '${app.session!.membership?.title ?? ''} · ${app.session!.organization?.name ?? ''} · ${app.session!.membership?.employeeId ?? ''}'
                   : 'Personal profile'),
             ),
-            if (app.corporate && (app.session!.membership?.isAdmin ?? false))
+            ListTile(
+            leading: const Icon(Icons.phone_iphone_rounded),
+            title: const Text('Your phone number'),
+            subtitle: Text(app.myPhone ?? 'Add it so friends who have your number find you'),
+            onTap: () {
+              Navigator.pop(sheet);
+              showPhoneNumberSheet(context);
+            },
+          ),
+          if (app.corporate && (app.session!.membership?.isAdmin ?? false))
               ListTile(
                 leading: const Icon(Icons.groups_rounded),
                 title: const Text('Team & company'),

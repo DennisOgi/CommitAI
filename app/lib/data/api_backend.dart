@@ -224,6 +224,10 @@ class ApiBackend extends Backend {
       await _req('POST', '/v1/contacts', body: {'name': name, 'app_user_id': userId, 'is_client': false}));
 
   @override
+  Future<String?> setMyPhone(String phone) async =>
+      (await _req('PATCH', '/v1/me/settings', body: {'phone': phone, 'region': 'NG'}))['phone_e164'] as String?;
+
+  @override
   Future<bool> setDiscoverable(bool on) async =>
       (await _req('PATCH', '/v1/me/settings', body: {'discoverable': on}))['discoverable'] as bool;
 
@@ -240,7 +244,7 @@ class ApiBackend extends Backend {
       final r = await _req('POST', '/v1/contacts/import', body: {'contacts': chunk, 'default_region': 'NG'});
       imported += r['imported'] as int;
       skipped += r['skipped'] as int;
-      onApp += r['on_app'] as int;
+      onApp = r['on_app'] as int; // already the total across the user's contacts
     }
     return (imported: imported, skipped: skipped, onApp: onApp);
   }

@@ -181,6 +181,7 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final _form = GlobalKey<FormState>();
   final _name = TextEditingController();
+  final _phone = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
   late bool _signUp = widget.signUp;
@@ -191,6 +192,7 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   void dispose() {
     _name.dispose();
+    _phone.dispose();
     _email.dispose();
     _password.dispose();
     super.dispose();
@@ -207,7 +209,7 @@ class _AuthScreenState extends State<AuthScreen> {
       _notice = null;
     });
     final n = _signUp
-        ? await app.signUpWithEmail(_name.text.trim(), _email.text.trim(), _password.text)
+        ? await app.signUpWithEmail(_name.text.trim(), _email.text.trim(), _password.text, phone: _phone.text.trim())
         : await app.signInWithEmail(_email.text.trim(), _password.text);
     if (!mounted) return;
     setState(() {
@@ -273,6 +275,24 @@ class _AuthScreenState extends State<AuthScreen> {
                       autofillHints: const [AutofillHints.name],
                       decoration: const InputDecoration(labelText: 'Full name', prefixIcon: Icon(Icons.person_outline_rounded)),
                       validator: (v) => (v ?? '').trim().length < 2 ? 'Enter your full name' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _phone,
+                      keyboardType: TextInputType.phone,
+                      textInputAction: TextInputAction.next,
+                      autofillHints: const [AutofillHints.telephoneNumber],
+                      decoration: const InputDecoration(
+                        labelText: 'Phone number',
+                        hintText: 'e.g. 0803 123 4567',
+                        helperText: 'Friends who have your number will see you on Commit AI',
+                        prefixIcon: Icon(Icons.phone_iphone_rounded),
+                      ),
+                      validator: (v) {
+                        final digits = (v ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+                        if (digits.isEmpty) return 'Enter your phone number';
+                        return digits.length < 10 || digits.length > 15 ? 'That number doesn’t look complete' : null;
+                      },
                     ),
                     const SizedBox(height: 12),
                   ],

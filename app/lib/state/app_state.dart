@@ -13,6 +13,7 @@ import '../data/api_backend.dart';
 import '../data/backend.dart';
 import '../data/demo_backend.dart';
 import '../models/models.dart';
+import '../services/contact_sync.dart';
 import '../services/reminder_service.dart';
 
 enum AuthStatus { loading, signedOut, offline, onboarding, ready }
@@ -108,6 +109,7 @@ class AppState extends ChangeNotifier {
 
   AppMode get mode => session?.mode ?? AppMode.personal;
   bool get corporate => mode == AppMode.corporate;
+
   /// Signed out and during onboarding the app wears the brand colour (saffron, as in the icon);
   /// once in, it follows the mode.
   ModePalette get palette => status != AuthStatus.ready || corporate ? ModePalette.corporate : ModePalette.personal;
@@ -182,11 +184,21 @@ class AppState extends ChangeNotifier {
 
   /// Signs the user straight in when the project doesn't require email confirmation;
   /// otherwise returns a notice asking them to confirm.
-  Future<AuthNotice?> signUpWithEmail(String name, String email, String password) async {
+  Future<AuthNotice?> signUpWithEmail(String name, String email, String password, {String phone = ''}) async {
     try {
-      final r = await sb.Supabase.instance.client.auth.signUp(email: email, password: password, data: {'full_name': name});
+      final r = await sb.Supabase.instance.client.auth
+          .signUp(email: email, password: password, data: {'full_name': name, if (phone.isNotEmpty) 'phone': phone});
       if (r.session == null) return AuthNotice('Check your inbox to confirm $email, then sign in.', isError: false);
-      await _attach(_supabaseBackend());
+      final b = _supabaseBackend();
+      if (phone.isNotEmpty) {
+        // Saved before the app opens, so friends who have this number see the new account.
+        try {
+          await b.setMyPhone(phone);
+        } on ApiException catch (e) {
+          phoneProblem = e.message; // shown on the home screen; the account itself is fine
+        }
+      }
+      await _attach(b);
       return null;
     } catch (e) {
       return AuthNotice(friendlyAuthError(e));
@@ -221,8 +233,10 @@ class AppState extends ChangeNotifier {
     _incomingSub = b.incoming.stream.listen((call) => incoming.value = call);
     _startRingPolling(b);
     unawaited(syncReminders());
+    contactsSynced = b is! DemoBackend && await ContactSync.hasSynced(session!.profile.id);
     status = b is DemoBackend || _onboarded ? AuthStatus.ready : AuthStatus.onboarding;
     notifyListeners();
+    unawaited(syncContacts()); // daily refresh: new contacts, and people who joined since
   }
 
   /// Without push (FCM) the app finds incoming calls by polling while it is open.
@@ -278,6 +292,48 @@ class AppState extends ChangeNotifier {
   }
 
   bool get recordsPersonalCalls => session?.profile.recordPersonalCalls ?? true;
+
+  /// Set when the number typed at sign-up couldn't be saved (e.g. used by another account).
+  String? phoneProblem;
+
+  String? get myPhone => session?.profile.phone;
+
+  /// Save (or remove, with "") the user's own phone number. Returns an error message or null.
+  Future<String?> setMyPhone(String phone) async {
+    try {
+      final saved = await backend!.setMyPhone(phone.trim());
+      session?.profile.phone = saved;
+      phoneProblem = null;
+      dataVersion++;
+      notifyListeners();
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+  /// Phone contacts imported on this phone at least once (the Contacts tab then stops offering it).
+  bool contactsSynced = false;
+
+  /// Import / refresh phone contacts if permission is given. Quiet: no UI, no permission prompt.
+  /// Returns the result when an import actually ran.
+  Future<({int imported, int skipped, int onApp})?> syncContacts({bool force = false}) async {
+    final b = backend, id = session?.profile.id;
+    if (b == null || id == null || b is DemoBackend) return null;
+    try {
+      final r = await ContactSync.run(b, id, force: force);
+      if (r != null) {
+        contactsSynced = true;
+        dataVersion++;
+        notifyListeners();
+      }
+      return r;
+    } catch (_) {
+      return null; // offline etc.: the next daily sync tries again
+    }
+  }
 
   bool get discoverable => session?.profile.discoverable ?? true;
 

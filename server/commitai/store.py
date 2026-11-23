@@ -116,6 +116,9 @@ class MemoryStore(Store):
 
 
 class SupabaseStore(Store):
+    PAGE = 1000
+    _KEY = {"presence": "user_id"}         # tables whose primary key isn't "id"
+
     def __init__(self, url: str, service_key: str) -> None:
         self._http = httpx.AsyncClient(
             base_url=f"{url.rstrip('/')}/rest/v1",
@@ -141,13 +144,19 @@ class SupabaseStore(Store):
             safe = "".join(ch for ch in v if ch not in "*%,()\\\"")
             params[k] = f"ilike.*{safe}*"
         params["select"] = "*"
-        if order:
-            params["order"] = f"{order}.{'desc' if desc else 'asc'}.nullslast"
-        if limit:
-            params["limit"] = str(limit)
-        r = await self._http.get(f"/{table}", params=params)
-        r.raise_for_status()
-        return r.json()
+        # A stable order so pages don't overlap; "id" breaks ties.
+        params["order"] = (f"{order}.{'desc' if desc else 'asc'}.nullslast," if order else "") + f"{self._KEY.get(table, 'id')}.asc"
+        # PostgREST returns at most PAGE rows per request (Supabase's default max-rows is 1000),
+        # so read page by page until we have everything (or `limit`).
+        out: list[Row] = []
+        while True:
+            want = self.PAGE if limit is None else min(self.PAGE, limit - len(out))
+            r = await self._http.get(f"/{table}", params={**params, "limit": str(want), "offset": str(len(out))})
+            r.raise_for_status()
+            page = r.json()
+            out.extend(page)
+            if len(page) < want or (limit is not None and len(out) >= limit):
+                return out
 
     async def insert(self, table, row):
         r = await self._http.post(f"/{table}", json=row)

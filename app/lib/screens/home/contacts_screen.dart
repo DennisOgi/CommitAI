@@ -11,6 +11,7 @@ import '../../models/models.dart';
 import '../../state/app_state.dart';
 import '../../widgets/common.dart';
 import '../../widgets/loader.dart';
+import '../../widgets/phone_sheet.dart';
 import '../call/call_actions.dart';
 
 class ContactsScreen extends StatefulWidget {
@@ -23,6 +24,9 @@ class ContactsScreen extends StatefulWidget {
 class _ContactsScreenState extends State<ContactsScreen> {
   String _q = '';
   bool _importing = false;
+
+  /// The round button: everyone, or only contacts who are on Commit AI (free app calls).
+  bool _onAppOnly = false;
 
   // "On Commit AI": everyone with an account, found by name or email.
   Timer? _debounce;
@@ -86,8 +90,14 @@ class _ContactsScreenState extends State<ContactsScreen> {
   List<Widget> _peopleSection(AppState app, List<Contact> contacts) {
     final q = _q.trim();
     if (q.length < 2 || app.isDemo) return const [];
-    final mine = {for (final c in contacts) if (c.appUserId != null) c.appUserId!};
-    final people = [for (final u in _people) if (!mine.contains(u.userId)) u];
+    final mine = {
+      for (final c in contacts)
+        if (c.appUserId != null) c.appUserId!
+    };
+    final people = [
+      for (final u in _people)
+        if (!mine.contains(u.userId)) u
+    ];
     final theme = Theme.of(context);
     return [
       Padding(
@@ -95,8 +105,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         child: Row(children: [
           Icon(Icons.public_rounded, size: 16, color: app.palette.accent),
           const SizedBox(width: 6),
-          Text('ON COMMIT AI',
-              style: theme.textTheme.labelMedium?.copyWith(letterSpacing: 1.2, fontWeight: FontWeight.w700)),
+          Text('ON COMMIT AI', style: theme.textTheme.labelMedium?.copyWith(letterSpacing: 1.2, fontWeight: FontWeight.w700)),
           const Spacer(),
           if (_searching) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
         ]),
@@ -162,31 +171,21 @@ class _ContactsScreenState extends State<ContactsScreen> {
     if (!await _contactsAllowed()) return;
     setState(() => _importing = true);
     try {
-      final all = await phone.FlutterContacts.getAll(
-          properties: {phone.ContactProperty.name, phone.ContactProperty.phone, phone.ContactProperty.email});
-      final payload = [
-        for (final c in all)
-          if ((c.displayName ?? '').trim().isNotEmpty && (c.phones.isNotEmpty || c.emails.isNotEmpty))
-            {
-              'name': c.displayName!.trim().length > 120 ? c.displayName!.trim().substring(0, 120) : c.displayName!.trim(),
-              'phones': [for (final p in c.phones.take(10)) p.number],
-              'emails': [for (final e in c.emails.take(10)) e.address],
-            }
-      ];
-      final r = await app.backend!.importContacts(payload);
+      final r = await app.syncContacts(force: true);
       if (!mounted) return;
+      if (r == null) {
+        toast(context, 'Couldn’t import right now. Check your connection and try again.', icon: Icons.error_outline_rounded);
+        return;
+      }
       toast(
         context,
         r.imported == 0
-            ? 'Your contacts are already up to date.'
+            ? 'Your contacts are up to date${r.onApp > 0 ? ' · ${r.onApp} on Commit AI' : ''}.'
             : 'Imported ${r.imported} contact${r.imported == 1 ? '' : 's'}'
                 '${r.onApp > 0 ? ' · ${r.onApp} on Commit AI' : ''}'
                 '${app.corporate ? '. Switch to Personal to see them' : ''}.',
         icon: Icons.check_circle_rounded,
       );
-      app.refresh();
-    } catch (e) {
-      if (mounted) toast(context, 'Import failed: $e', icon: Icons.error_outline_rounded);
     } finally {
       if (mounted) setState(() => _importing = false);
     }
@@ -355,77 +354,126 @@ class _ContactsScreenState extends State<ContactsScreen> {
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     return Scaffold(
-      floatingActionButton: FloatingActionButton(onPressed: _add, child: const Icon(Icons.person_add_alt_1_rounded)),
       body: Loader<List<Contact>>(
         load: (b) => b.contacts(),
         builder: (context, contacts, reload) {
           final q = _q.toLowerCase();
+          final onAppCount = contacts.where((c) => c.onApp).length;
           final shown = contacts
               .where((c) =>
-                  q.isEmpty ||
-                  c.name.toLowerCase().contains(q) ||
-                  (c.company ?? '').toLowerCase().contains(q) ||
-                  (c.phone ?? '').contains(q))
+                  (!_onAppOnly || c.onApp) &&
+                  (q.isEmpty ||
+                      c.name.toLowerCase().contains(q) ||
+                      (c.company ?? '').toLowerCase().contains(q) ||
+                      (c.phone ?? '').contains(q)))
               .toList();
-          return RefreshIndicator(
-            onRefresh: reload,
-            child: ListView(padding: const EdgeInsets.only(bottom: 96), children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-                child: Text(app.corporate ? 'Clients' : 'Contacts', style: AppType.display(36, weight: FontWeight.w500)),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: TextField(
-                  onChanged: _onQuery,
-                  textInputAction: TextInputAction.search,
-                  decoration: InputDecoration(
-                    hintText: app.corporate ? 'Search clients, or anyone on Commit AI' : 'Search contacts or anyone on Commit AI',
-                    prefixIcon: const Icon(Icons.search_rounded),
-                  ),
-                ),
-              ),
-              if (app.corporate)
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 12, 20, 0),
-                  child: Text('Shared company directory. Personal contacts are hidden in Work mode.',
-                      style: TextStyle(fontSize: 12, color: AppColors.textFaint)),
-                ),
-              if (_phoneContactsAvailable && !app.isDemo)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  child: Card(
-                    child: ListTile(
-                      leading: Icon(Icons.contacts_rounded, color: app.palette.accent),
-                      title: Text(contacts.isEmpty ? 'Import your phone contacts' : 'Sync phone contacts',
-                          style: const TextStyle(fontWeight: FontWeight.w700)),
-                      subtitle: Text(app.corporate
-                          ? 'Saved to your private Personal contacts (switch to Personal to see them).'
-                          : 'Call them here and see who is on Commit AI. Private to you.'),
-                      trailing: _importing
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.chevron_right_rounded),
-                      onTap: _importing ? null : _importFromPhone,
+          final people = _peopleSection(app, contacts);
+          return Stack(children: [
+            RefreshIndicator(
+              onRefresh: () async {
+                await app.syncContacts(force: true); // pull-to-refresh also picks up new phone contacts
+                await reload();
+              },
+              child: CustomScrollView(slivers: [
+                SliverToBoxAdapter(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                      child: Row(children: [
+                        Expanded(
+                          child: Text(
+                            _onAppOnly ? 'On Commit AI' : (app.corporate ? 'Clients' : 'Contacts'),
+                            style: AppType.display(36, weight: FontWeight.w500),
+                          ),
+                        ),
+                        IconButton.filledTonal(
+                          tooltip: app.corporate ? 'Add a client' : 'Add a contact',
+                          onPressed: _add,
+                          icon: const Icon(Icons.person_add_alt_1_rounded),
+                        ),
+                      ]),
                     ),
-                  ),
-                ),
-              const SizedBox(height: 8),
-              for (final c in shown)
-                ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
-                  leading: Avatar(name: c.name),
-                  title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text([if (c.company != null) c.company!, prettyPhone(c.phone)].where((s) => s.isNotEmpty).join(' · ')),
-                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                    if (c.onApp) Pill('App', color: app.palette.accent, dense: true),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.chevron_right_rounded, color: AppColors.textFaint),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: TextField(
+                        onChanged: _onQuery,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: app.corporate ? 'Search clients, or anyone on Commit AI' : 'Search contacts or anyone on Commit AI',
+                          prefixIcon: const Icon(Icons.search_rounded),
+                        ),
+                      ),
+                    ),
+                    if (app.corporate)
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(20, 12, 20, 0),
+                        child: Text('Shared company directory. Personal contacts are hidden in Work mode.',
+                            style: TextStyle(fontSize: 12, color: AppColors.textFaint)),
+                      ),
+                    if (!app.corporate) const AddPhoneNudge(),
+                    // Offered until the first import; after that the app keeps contacts in sync by itself.
+                    if (_phoneContactsAvailable && !app.isDemo && !app.contactsSynced)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                        child: Card(
+                          child: ListTile(
+                            leading: Icon(Icons.contacts_rounded, color: app.palette.accent),
+                            title: const Text('Import your phone contacts', style: TextStyle(fontWeight: FontWeight.w700)),
+                            subtitle: Text(app.corporate
+                                ? 'Saved to your private Personal contacts (switch to Personal to see them).'
+                                : 'See who’s on Commit AI and call them free. Private to you.'),
+                            trailing: _importing
+                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                : const Icon(Icons.chevron_right_rounded),
+                            onTap: _importing ? null : _importFromPhone,
+                          ),
+                        ),
+                      ),
+                    if (_onAppOnly && shown.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(24, 32, 24, 0),
+                        child: Text(
+                          'None of your contacts are on Commit AI yet. When someone you have saved joins, they’ll show up here.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppColors.textDim),
+                        ),
+                      ),
+                    const SizedBox(height: 8),
                   ]),
-                  onTap: () => _open(c),
                 ),
-              ..._peopleSection(app, contacts),
-            ]),
-          );
+                SliverList.builder(
+                  itemCount: shown.length,
+                  itemBuilder: (context, i) {
+                    final c = shown[i];
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+                      leading: Avatar(name: c.name),
+                      title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text([if (c.company != null) c.company!, prettyPhone(c.phone)].where((s) => s.isNotEmpty).join(' · ')),
+                      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                        if (c.onApp) Pill('On Commit AI', color: app.palette.accent, dense: true),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.chevron_right_rounded, color: AppColors.textFaint),
+                      ]),
+                      onTap: () => _open(c),
+                    );
+                  },
+                ),
+                SliverToBoxAdapter(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: people)),
+                const SliverToBoxAdapter(child: SizedBox(height: 110)),
+              ]),
+            ),
+            Positioned(
+              right: 16,
+              bottom: 16,
+              child: FloatingActionButton.extended(
+                heroTag: 'contacts-filter',
+                onPressed: () => setState(() => _onAppOnly = !_onAppOnly),
+                icon: Icon(_onAppOnly ? Icons.people_alt_rounded : Icons.wifi_calling_3_rounded),
+                label: Text(_onAppOnly ? 'All contacts' : 'On Commit AI · $onAppCount'),
+              ),
+            ),
+          ]);
         },
       ),
     );

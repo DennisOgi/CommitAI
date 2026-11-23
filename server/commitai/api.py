@@ -240,16 +240,47 @@ async def me(user_id: str = CurrentUser):
 class SettingsBody(BaseModel):
     record_personal_calls: bool | None = None
     discoverable: bool | None = None          # "Let people find me" in search
+    phone: str | None = Field(default=None, max_length=32)   # the user's own number ("" removes it)
+    region: str = Field(default="NG", min_length=2, max_length=2)
 
 
 @app.patch("/v1/me/settings")
 async def update_settings(body: SettingsBody, user_id: str = CurrentUser):
-    patch = body.model_dump(exclude_none=True)
+    patch = body.model_dump(exclude_none=True, exclude={"phone", "region"})
+    if body.phone is not None:
+        await set_my_phone(user_id, body.phone, body.region)
     if patch:
         await db.update("profiles", patch, id=user_id)
     prof = await db.get("profiles", id=user_id) or {}
     return {"record_personal_calls": prof.get("record_personal_calls", True),
-            "discoverable": prof.get("discoverable", True)}
+            "discoverable": prof.get("discoverable", True), "phone_e164": prof.get("phone_e164")}
+
+
+async def set_my_phone(user_id: str, raw: str, region: str = "NG") -> str | None:
+    """Save the user's own number. Everyone who has it in their imported contacts now sees them
+    as "on Commit AI" (free app calls), the way Telegram shows contacts who joined."""
+    prof = await db.get("profiles", id=user_id) or {}
+    old = prof.get("phone_e164")
+    phone = None
+    if raw.strip():
+        parsed = _e164(raw, region)
+        if not parsed:
+            raise HTTPException(422, "That phone number isn't valid. Include the area code, e.g. 0803 123 4567.")
+        phone = parsed[0]
+        other = await db.get("profiles", phone_e164=phone)
+        if other and other["id"] != user_id:
+            raise HTTPException(409, "That number is already used by another Commit AI account.")
+    if phone == old:
+        return phone
+    await db.update("profiles", {"phone_e164": phone}, id=user_id)
+    if old:                                     # the old number isn't theirs any more
+        for c in await db.select("contacts", phone_e164=old, app_user_id=user_id):
+            await db.update("contacts", {"app_user_id": None}, id=c["id"])
+    if phone:
+        for c in await db.select("contacts", phone_e164=phone):
+            if not c.get("app_user_id") and c.get("owner_id") != user_id:
+                await db.update("contacts", {"app_user_id": user_id}, id=c["id"])
+    return phone
 
 
 def _public_member(m: dict) -> dict:
@@ -716,7 +747,12 @@ async def search_users(q: str = "", user_id: str = CurrentUser):
     if len(q) < 2:
         return []
     found: dict[str, dict] = {}
-    if "@" in q:
+    digits = "".join(ch for ch in q if ch.isdigit())
+    if len(digits) >= 7 and not any(ch.isalpha() for ch in q):
+        parsed = _e164(q, "NG")                   # a phone number: exact match only
+        for p in (await db.select("profiles", phone_e164=parsed[0], limit=1) if parsed else []):
+            found[p["id"]] = p
+    elif "@" in q:
         for p in await db.select("profiles", email=q.lower(), limit=1):
             found[p["id"]] = p
     else:
@@ -755,40 +791,69 @@ def _e164(raw: str, region: str) -> tuple[str, bool] | None:
             kind in (PhoneNumberType.MOBILE, PhoneNumberType.FIXED_LINE_OR_MOBILE))
 
 
+_import_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+
+async def _profiles_by(column: str, values: list[str], exclude: str | None = None) -> dict[str, str]:
+    """value → profile id, for profiles whose `column` is one of `values` (looked up in batches)."""
+    found: dict[str, str] = {}
+    vals = sorted(set(values))
+    for i in range(0, len(vals), 80):            # small batches: the lookup goes in the URL
+        for prof in await db.select("profiles", in_={column: vals[i:i + 80]}):
+            if prof["id"] != exclude and prof.get(column):
+                found[prof[column]] = prof["id"]
+    return found
+
+
 @app.post("/v1/contacts/import")
 async def import_contacts(body: ContactImport, user_id: str = CurrentUser):
     """The user's phone address book, imported into their PERSONAL contacts (never the company's).
-    Numbers are normalised to E.164, duplicates skipped, and anyone with a Commit AI account
-    (matched by email) is linked so they can be app-called."""
-    existing = await db.select("contacts", owner_id=user_id, org_id=None)
-    have_phones = {c["phone_e164"] for c in existing if c.get("phone_e164")}
-    have_users = {c["app_user_id"] for c in existing if c.get("app_user_id")}
-    emails = {e.strip().lower() for pc in body.contacts for e in pc.emails if "@" in e}
-    users = {}
-    wanted = sorted(emails)[:5000]
-    for i in range(0, len(wanted), 80):          # small batches: the lookup goes in the URL
-        for prof in await db.select("profiles", in_={"email": wanted[i:i + 80]}):
-            if prof["id"] != user_id:
-                users[prof["email"]] = prof["id"]
-    rows, skipped, on_app = [], 0, 0
-    for pc in body.contacts:
-        numbers = [x for x in (_e164(p, body.default_region) for p in pc.phones) if x]
-        numbers.sort(key=lambda x: not x[1])            # prefer a mobile number
-        phone = numbers[0][0] if numbers else None
-        app_user = next((users[e.strip().lower()] for e in pc.emails if e.strip().lower() in users), None)
-        if (phone and phone in have_phones) or (not phone and not app_user) or (app_user and app_user in have_users):
-            skipped += 1
-            continue
-        rows.append({"name": pc.name.strip(), "company": None, "phone_e164": phone, "is_client": False,
-                     "owner_id": user_id, "org_id": None, "app_user_id": app_user, "source": "phone"})
-        if phone:
-            have_phones.add(phone)
-        if app_user:
-            have_users.add(app_user)
-            on_app += 1
-    for i in range(0, len(rows), 500):
-        await db.insert("contacts", rows[i:i + 500])
-    return {"imported": len(rows), "skipped": skipped, "on_app": on_app}
+    Safe to repeat (the app re-syncs quietly): numbers are normalised to E.164 and anything already
+    imported is skipped. Contacts who use Commit AI, matched by phone number or email, are linked so
+    they can be app-called; that includes earlier imports of people who have joined since."""
+    async with _import_locks[user_id]:           # one import at a time per user: no double inserts
+        existing = await db.select("contacts", owner_id=user_id, org_id=None)
+        have_phones = {c["phone_e164"] for c in existing if c.get("phone_e164")}
+        have_users = {c["app_user_id"] for c in existing if c.get("app_user_id")}
+
+        parsed = []
+        for pc in body.contacts:
+            numbers = [x for x in (_e164(p, body.default_region) for p in pc.phones) if x]
+            numbers.sort(key=lambda x: not x[1])        # prefer a mobile number
+            parsed.append((pc, [n for n, _ in numbers]))
+        by_phone = await _profiles_by("phone_e164", [n for _, ns in parsed for n in ns]
+                                      + [c["phone_e164"] for c in existing if c.get("phone_e164") and not c.get("app_user_id")],
+                                      exclude=user_id)
+        by_email = await _profiles_by("email", [e.strip().lower() for pc in body.contacts for e in pc.emails if "@" in e],
+                                      exclude=user_id)
+
+        rows, skipped = [], 0
+        for pc, numbers in parsed:
+            phone = numbers[0] if numbers else None
+            app_user = (next((by_phone[n] for n in numbers if n in by_phone), None)
+                        or next((by_email[e.strip().lower()] for e in pc.emails if e.strip().lower() in by_email), None))
+            if (phone and phone in have_phones) or (not phone and not app_user) or (app_user and app_user in have_users):
+                skipped += 1
+                continue
+            rows.append({"name": pc.name.strip()[:120], "company": None, "phone_e164": phone, "is_client": False,
+                         "owner_id": user_id, "org_id": None, "app_user_id": app_user, "source": "phone"})
+            if phone:
+                have_phones.add(phone)
+            if app_user:
+                have_users.add(app_user)
+        for i in range(0, len(rows), 500):
+            await db.insert("contacts", rows[i:i + 500])
+
+        # Contacts imported earlier whose owner has joined Commit AI since.
+        linked = 0
+        for c in existing:
+            uid = by_phone.get(c.get("phone_e164") or "")
+            if uid and not c.get("app_user_id") and uid not in have_users:
+                await db.update("contacts", {"app_user_id": uid}, id=c["id"])
+                have_users.add(uid)
+                linked += 1
+        return {"imported": len(rows), "skipped": skipped, "linked": linked,
+                "on_app": len(have_users)}
 
 
 # ============================================================== calls ======

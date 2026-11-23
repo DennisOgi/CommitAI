@@ -216,7 +216,13 @@ class _PermissionsPage extends StatefulWidget {
 }
 
 class _PermissionsPageState extends State<_PermissionsPage> {
-  final Map<Permission, PermissionStatus?> _status = {Permission.microphone: null, Permission.notification: null};
+  final Map<Permission, PermissionStatus?> _status = {
+    Permission.microphone: null,
+    Permission.notification: null,
+    Permission.contacts: null,
+  };
+  bool _importing = false;
+  String? _imported;
 
   @override
   void initState() {
@@ -243,12 +249,29 @@ class _PermissionsPageState extends State<_PermissionsPage> {
       await p.request();
     }
     await _refresh();
+    if (p == Permission.contacts && (_status[p]?.isGranted ?? false) && mounted) _import();
+  }
+
+  /// Contacts allowed: import straight away, in the background (onboarding carries on).
+  Future<void> _import() async {
+    final app = AppScope.read(context);
+    setState(() => _importing = true);
+    final r = await app.syncContacts(force: true);
+    if (!mounted) return;
+    setState(() {
+      _importing = false;
+      _imported = r == null
+          ? null
+          : r.onApp > 0
+              ? '${r.imported} contacts imported · ${r.onApp} on Commit AI'
+              : '${r.imported} contacts imported';
+    });
   }
 
   @override
   Widget build(BuildContext context) => _Page(
         kicker: 'Permissions',
-        title: 'Two things to allow.',
+        title: 'Three things to allow.',
         body: 'Asked once now, so a call never stalls on a pop-up.',
         art: const SizedBox.shrink(),
         footer: Column(children: [
@@ -266,6 +289,17 @@ class _PermissionsPageState extends State<_PermissionsPage> {
             why: 'For incoming calls, deadline reminders and your manager’s follow-ups.',
             status: _status[Permission.notification],
             onAllow: () => _ask(Permission.notification),
+          ),
+          const SizedBox(height: 10),
+          _PermissionRow(
+            icon: Icons.contacts_rounded,
+            title: 'Contacts',
+            why: _importing
+                ? 'Importing your contacts…'
+                : _imported ??
+                    'See which of your contacts are on Commit AI and call them free. Kept private to you, never shared with your company.',
+            status: _status[Permission.contacts],
+            onAllow: () => _ask(Permission.contacts),
           ),
         ]),
       );

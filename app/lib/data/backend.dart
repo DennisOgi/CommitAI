@@ -77,6 +77,10 @@ abstract class Backend {
   Future<Contact> addAppUser({required String name, required String userId}) =>
       throw UnsupportedError('Not available in the demo.');
 
+  /// The user's own phone number, so people who have it saved see them on Commit AI.
+  /// "" removes it. Returns the saved number in international format.
+  Future<String?> setMyPhone(String phone) async => phone.isEmpty ? null : phone;
+
   /// "Let people find me" on/off. Returns the saved value.
   Future<bool> setDiscoverable(bool on) async => on;
 

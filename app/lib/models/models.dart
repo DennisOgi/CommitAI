@@ -23,7 +23,7 @@ T _enum<T extends Enum>(List<T> values, dynamic raw, T fallback) {
 String enumWire(Enum e) => _snake(e.name);
 
 class Profile {
-  Profile({required this.id, required this.fullName, this.recordPersonalCalls = true, this.discoverable = true});
+  Profile({required this.id, required this.fullName, this.recordPersonalCalls = true, this.discoverable = true, this.phone});
   final String id;
   final String fullName;
 
@@ -33,12 +33,16 @@ class Profile {
   /// Others can find this user by name in "On Commit AI" search.
   bool discoverable;
 
+  /// The user's own number (E.164): how contacts who have it saved find them.
+  String? phone;
+
   factory Profile.fromJson(Map<String, dynamic> j) =>
       Profile(
         id: j['id'],
         fullName: j['full_name'] ?? '',
         recordPersonalCalls: j['record_personal_calls'] ?? true,
         discoverable: j['discoverable'] ?? true,
+        phone: j['phone_e164'],
       );
 }
 
