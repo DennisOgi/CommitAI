@@ -30,7 +30,7 @@ class Profile {
   /// Personal calls are recorded for the user's own commitments (private to them) unless switched off.
   bool recordPersonalCalls;
 
-  /// Others can find this user by name in "On Commit AI" search.
+  /// Others can find this user by name in "On Commit Call" search.
   bool discoverable;
 
   /// The user's own number (E.164): how contacts who have it saved find them.
@@ -46,7 +46,7 @@ class Profile {
       );
 }
 
-/// Someone with a Commit AI account, found by search. App calls to them are free.
+/// Someone with a Commit Call account, found by search. App calls to them are free.
 class PlatformUser {
   PlatformUser({required this.userId, required this.fullName, this.emailHint, this.contactId});
   final String userId;
@@ -56,7 +56,7 @@ class PlatformUser {
 
   factory PlatformUser.fromJson(Map<String, dynamic> j) => PlatformUser(
         userId: j['user_id'],
-        fullName: j['full_name'] ?? 'Commit AI user',
+        fullName: j['full_name'] ?? 'Commit Call user',
         emailHint: j['email_hint'],
         contactId: j['contact_id'],
       );
@@ -169,8 +169,8 @@ class MemberCredentials {
   final String corpCode;
   final String tempPin;
 
-  String get shareText => 'You\'ve been added to Commit AI.\n'
-      '1. Install Commit AI and create your account${member.email != null ? ' with ${member.email}' : ''}.\n'
+  String get shareText => 'You\'ve been added to Commit Call.\n'
+      '1. Install Commit Call and create your account${member.email != null ? ' with ${member.email}' : ''}.\n'
       '2. Tap Work and sign in with:\n'
       '   Company code: $corpCode\n'
       '   Employee ID: ${member.employeeId}\n'
@@ -265,7 +265,7 @@ class CallRecord {
   final String? counterpartNumber;
   final String? contactId;
 
-  /// The other person's Commit AI account, for app calls (call back from Recents).
+  /// The other person's Commit Call account, for app calls (call back from Recents).
   final String? counterpartUserId;
   final DateTime startedAt;
   final DateTime? answeredAt;
@@ -389,7 +389,7 @@ class CommitmentEvent {
 
   factory CommitmentEvent.fromJson(Map<String, dynamic> j) => CommitmentEvent(
         kind: j['kind'],
-        actorName: j['actor_name'] ?? 'Commit AI',
+        actorName: j['actor_name'] ?? 'Commit Call',
         at: _dt(j['created_at']) ?? DateTime.now(),
         payload: Map<String, dynamic>.from(j['payload'] ?? const {}),
       );

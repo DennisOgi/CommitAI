@@ -55,7 +55,7 @@ class _CommitmentsScreenState extends State<CommitmentsScreen> {
             if (!forMember)
               Padding(
                 padding: const EdgeInsets.fromLTRB(4, 4, 4, 14),
-                child: Text('Commitments', style: AppType.display(36, weight: FontWeight.w500)),
+                child: Text('Commitments', style: AppType.display(28, weight: FontWeight.w600)),
               ),
             Card(
               child: Padding(

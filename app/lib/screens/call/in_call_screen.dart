@@ -9,7 +9,6 @@ import '../../core/theme.dart';
 import '../../models/models.dart';
 import '../../state/app_state.dart';
 import '../../widgets/common.dart';
-import 'post_call_review_screen.dart';
 
 class InCallScreen extends StatefulWidget {
   const InCallScreen({super.key});
@@ -34,29 +33,16 @@ class _InCallScreenState extends State<InCallScreen> with SingleTickerProviderSt
   void _onCall() {
     if (calls.phase != CallPhase.ended || _closing) return;
     _closing = true;
-    final flagged = List<String>.of(calls.flagged);
     final app = AppScope.read(context);
     // Linger a little longer when there's an error, so the reason can be read.
     Timer(Duration(milliseconds: calls.error != null ? 2500 : 900), () {
       if (!mounted) return;
-      final review = calls.reviewReady.value;
       calls.reviewReady.value = null;
-      final peer = calls.peerName;
       calls.dismiss();
       app.refresh();
-      final messenger = ScaffoldMessenger.maybeOf(context);
-      final nav = Navigator.of(context);
-      nav.pop();
-      if (review != null) {
-        messenger?.showSnackBar(SnackBar(
-          duration: const Duration(seconds: 8),
-          content: Text('Pulling the commitments out of your call with $peer…'),
-          action: SnackBarAction(
-            label: 'Review',
-            onPressed: () => nav.push(MaterialPageRoute(builder: (_) => PostCallReviewScreen(callId: review, flagged: flagged))),
-          ),
-        ));
-      }
+      // Back to the app. The commitments wait on the Calls tab (Review / Ignore), never in a
+      // pop-up that could sit over the next incoming call.
+      Navigator.of(context).pop();
     });
   }
 
@@ -100,7 +86,7 @@ class _InCallScreenState extends State<InCallScreen> with SingleTickerProviderSt
                       ? RecordingBadge(
                           label: calls.call?.mode == AppMode.personal
                               ? 'Personal · recorded temporarily for commitments'
-                              : 'Recording · Commit AI is listening')
+                              : 'Recording · Commit Call is listening')
                       : const Pill('Personal · not recorded', color: AppColors.textDim, icon: Icons.lock_rounded),
                   const SizedBox(height: 28),
                   _PulsingAvatar(name: calls.peerName, animation: _pulse, pulsing: !active && calls.phase != CallPhase.ended, accent: p.accent),

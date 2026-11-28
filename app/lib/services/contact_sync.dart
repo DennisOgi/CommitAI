@@ -9,7 +9,7 @@ import '../data/backend.dart';
 ///
 /// * The first import happens as soon as contacts permission is given (onboarding or the
 ///   Contacts tab). After that the app re-syncs quietly at most once a day to pick up new
-///   contacts and people who have joined Commit AI since. The server skips anything already
+///   contacts and people who have joined Commit Call since. The server skips anything already
 ///   imported, so syncing never duplicates.
 /// * Nothing leaves the phone without the user's permission: a sync never asks for it.
 class ContactSync {

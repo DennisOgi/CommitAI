@@ -1018,7 +1018,7 @@ class _CompanySettingsState extends State<_CompanySettings> {
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Announce recording on work calls'),
-          subtitle: const Text('Commit AI tells both sides the call is recorded.'),
+          subtitle: const Text('Commit Call tells both sides the call is recorded.'),
           value: _announce,
           onChanged: (v) => setState(() => _announce = v),
         ),

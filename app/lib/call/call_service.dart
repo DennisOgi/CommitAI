@@ -35,6 +35,9 @@ class CallService {
     await _call('stop');
   }
 
+  /// "Ready for calls" background service: keeps the app able to ring while it's in the background.
+  static Future<void> standby(bool on) => _call(on ? 'standby' : 'standbyStop');
+
   /// Incoming call: ringtone + vibration + full-screen notification (wakes the screen).
   static Future<void> ring(String caller, {bool work = false}) async {
     _ringing = true;

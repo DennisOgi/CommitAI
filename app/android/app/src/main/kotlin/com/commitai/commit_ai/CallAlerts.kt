@@ -146,7 +146,7 @@ object CallAlerts {
         val n = builder
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(caller)
-            .setContentText(if (work) "Incoming work call · Commit AI" else "Incoming call · Commit AI")
+            .setContentText(if (work) "Incoming work call · Commit Call" else "Incoming call · Commit Call")
             .setCategory(Notification.CATEGORY_CALL)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setOngoing(true)

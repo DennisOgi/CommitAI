@@ -1,12 +1,15 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:permission_handler/permission_handler.dart' as perm;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import '../call/call_controller.dart';
+import '../call/call_service.dart';
 import '../core/config.dart';
 import '../core/theme.dart';
 import '../data/api_backend.dart';
@@ -28,7 +31,7 @@ class AuthNotice {
 /// Turns auth / network failures into sentences people can act on.
 String friendlyAuthError(Object e) {
   // Our own server's errors already carry a precise, readable message (including
-  // "Can't reach the Commit AI server" when it's down), so don't second-guess them.
+  // "Can't reach the Commit Call server" when it's down), so don't second-guess them.
   if (e is ApiException) return e.message;
   final raw = e is sb.AuthException ? e.message : e.toString();
   final m = raw.toLowerCase();
@@ -230,13 +233,70 @@ class AppState extends ChangeNotifier {
     calls?.dispose();
     calls = CallController(b, session!.profile.fullName);
     await _incomingSub?.cancel();
-    _incomingSub = b.incoming.stream.listen((call) => incoming.value = call);
+    _incomingSub = b.incoming.stream.listen(_onIncomingCall);
     _startRingPolling(b);
+    unawaited(_startStandby(b));
     unawaited(syncReminders());
     contactsSynced = b is! DemoBackend && await ContactSync.hasSynced(session!.profile.id);
     status = b is DemoBackend || _onboarded ? AuthStatus.ready : AuthStatus.onboarding;
     notifyListeners();
     unawaited(syncContacts()); // daily refresh: new contacts, and people who joined since
+  }
+
+  Timer? _ringWatch;
+
+  /// A call is ringing for us. Ring the phone *now*, from here: the incoming-call screen isn't
+  /// drawn while the app is in the background, so ringing can't wait for it.
+  void _onIncomingCall(IncomingCall call) {
+    incoming.value = call;
+    if (backend is DemoBackend) return;
+    unawaited(CallService.ring(call.callerName.split(' · ').first, work: call.mode == AppMode.corporate));
+    _ringWatch?.cancel();
+    final b = backend!, started = DateTime.now();
+    _ringWatch = Timer.periodic(const Duration(seconds: 2), (t) async {
+      // Stop ringing once it's answered, declined, given up on, or after 45 seconds.
+      if ((calls?.busy ?? false) || DateTime.now().difference(started) > const Duration(seconds: 45)) {
+        t.cancel();
+        await CallService.stopRing();
+        return;
+      }
+      try {
+        if ((await b.callDetail(call.callId)).call.status != 'ringing') {
+          t.cancel();
+          await CallService.stopRing();
+        }
+      } catch (_) {}
+    });
+  }
+
+  /// "Ring when the app is in the background" (Android). On by default.
+  bool get ringInBackground => _prefs?.getBool('ring_in_background') ?? true;
+
+  Future<void> setRingInBackground(bool on) async {
+    await _prefs?.setBool('ring_in_background', on);
+    final b = backend;
+    if (on && b != null) {
+      await _startStandby(b, askBattery: true);
+    } else {
+      await CallService.standby(false);
+    }
+    notifyListeners();
+  }
+
+  /// Keep the app able to notice calls in the background (no push yet), and ask once to be
+  /// exempt from battery restrictions, which some phones (Tecno, Infinix, Xiaomi…) apply hard.
+  Future<void> _startStandby(Backend b, {bool askBattery = false}) async {
+    if (b is DemoBackend || AppConfig.pushEnabled || kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    if (!ringInBackground) return;
+    await CallService.standby(true);
+    if (askBattery || !(_prefs?.getBool('asked_battery') ?? false)) {
+      await _prefs?.setBool('asked_battery', true);
+      try {
+        if (!await perm.Permission.ignoreBatteryOptimizations.isGranted) {
+          await perm.Permission.ignoreBatteryOptimizations.request();
+        }
+      } catch (_) {}
+    }
   }
 
   /// Without push (FCM) the app finds incoming calls by polling while it is open.
@@ -260,6 +320,9 @@ class AppState extends ChangeNotifier {
     if (corporate) await backend?.setMode(AppMode.personal).catchError((_) => <HeldCall>[]);
     await ReminderService.instance.clear();
     _ringPoll?.cancel();
+    _ringWatch?.cancel();
+    await CallService.stopRing();
+    await CallService.standby(false);
     await _prefs?.remove('demo_persona');
     await _prefs?.remove('dev_user');
     await _writeCorp(null);

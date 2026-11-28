@@ -7,8 +7,9 @@ import '../../core/theme.dart';
 import '../../models/models.dart';
 import '../../state/app_state.dart';
 import '../../widgets/common.dart';
+import 'review_actions.dart';
 
-/// Right after a work call: Commit AI shows what it heard you promise.
+/// Right after a work call: Commit Call shows what it heard you promise.
 /// You confirm, edit or drop each one; anything you skip is auto-shared in 24h.
 class PostCallReviewScreen extends StatefulWidget {
   const PostCallReviewScreen({super.key, required this.callId, this.flagged = const []});
@@ -158,7 +159,7 @@ class _PostCallReviewScreenState extends State<PostCallReviewScreen> {
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('Add a commitment', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 4),
-          Text('A commitment Commit AI missed.', style: Theme.of(context).textTheme.bodyMedium),
+          Text('A commitment Commit Call missed.', style: Theme.of(context).textTheme.bodyMedium),
           const SizedBox(height: 14),
           TextField(controller: ctrl, autofocus: true, decoration: const InputDecoration(hintText: 'e.g. Send the driver’s contact for the Kano route')),
           const SizedBox(height: 14),
@@ -174,7 +175,22 @@ class _PostCallReviewScreenState extends State<PostCallReviewScreen> {
     final p = AppScope.of(context).palette;
     final d = _detail;
     return Scaffold(
-      appBar: AppBar(title: const Text('Call review')),
+      appBar: AppBar(
+        title: const Text('Review commitments'),
+        actions: [
+          if (d != null && !_approved)
+            TextButton(
+              onPressed: _saving
+                  ? null
+                  : () async {
+                      final ok = await ignoreReview(context,
+                          callId: widget.callId, mode: d.call.mode, commitmentIds: [for (final x in _drafts) x.c.id]);
+                      if (ok && context.mounted) Navigator.of(context).pop();
+                    },
+              child: const Text('Ignore'),
+            ),
+        ],
+      ),
       body: d == null ? _Thinking(step: _step, accent: p.accent) : _body(d, p),
       bottomNavigationBar: d == null
           ? null
@@ -274,7 +290,7 @@ class _PostCallReviewScreenState extends State<PostCallReviewScreen> {
             Expanded(child: Text('You flagged ${widget.flagged.join(', ')}. Make sure it’s listed above.', style: const TextStyle(fontSize: 13))),
           ]),
         ),
-      OutlinedButton.icon(onPressed: _addMissed, icon: const Icon(Icons.add_rounded), label: const Text('Add one Commit AI missed')),
+      OutlinedButton.icon(onPressed: _addMissed, icon: const Icon(Icons.add_rounded), label: const Text('Add one Commit Call missed')),
       if (theirs.isNotEmpty) ...[
         SectionLabel('${d.call.counterpartName.split(' ').first} committed to', padding: const EdgeInsets.fromLTRB(4, 26, 4, 10)),
         for (final x in theirs) _DraftCard(draft: x, accent: AppColors.info, onToggle: () => setState(() => x.keep = !x.keep), onEdit: () => _edit(x), onDue: () => _pickDue(x)),
@@ -380,7 +396,7 @@ class _Thinking extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           SizedBox(width: 56, height: 56, child: CircularProgressIndicator(strokeWidth: 3, color: accent)),
           const SizedBox(height: 24),
-          Text('Commit AI is reviewing your call', style: Theme.of(context).textTheme.titleMedium),
+          Text('Commit Call is reviewing your call', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 18),
           for (var i = 0; i < steps.length; i++)
             Padding(

@@ -202,9 +202,25 @@ class ScreenTitle extends StatelessWidget {
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.primary)),
                 const SizedBox(height: 6),
               ],
-              Text(title, style: AppType.display(36, weight: FontWeight.w500)),
+              Text(title, style: AppType.display(28, weight: FontWeight.w600)),
             ]),
           ),
+          if (trailing != null) trailing!,
+        ]),
+      );
+}
+
+/// A tab's heading: one size everywhere, with room for an action on the right.
+class PageTitle extends StatelessWidget {
+  const PageTitle(this.title, {super.key, this.trailing});
+  final String title;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 12, 10),
+        child: Row(children: [
+          Expanded(child: Text(title, style: AppType.display(28, weight: FontWeight.w600))),
           if (trailing != null) trailing!,
         ]),
       );
@@ -429,7 +445,7 @@ class _RecordingDotState extends State<RecordingDot> with SingleTickerProviderSt
 
 /// Pulsing red dot + label. (The pulse lives in [RecordingDot].)
 class RecordingBadge extends StatelessWidget {
-  const RecordingBadge({super.key, this.label = 'Recording · Commit AI is listening'});
+  const RecordingBadge({super.key, this.label = 'Recording · Commit Call is listening'});
   final String label;
 
   @override

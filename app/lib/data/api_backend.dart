@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import '../models/models.dart';
 import 'backend.dart';
 
-/// Talks to the Commit AI FastAPI server.
+/// Talks to the Commit Call FastAPI server.
 class ApiBackend extends Backend {
   ApiBackend(this.baseUrl, this.token);
 
@@ -27,7 +27,7 @@ class ApiBackend extends Backend {
     } on TimeoutException {
       throw ApiException(0, 'The server took too long to respond. Check your connection.');
     } on http.ClientException {
-      throw ApiException(0, "Can't reach the Commit AI server. If your internet is working, the server may be down; try again in a moment.");
+      throw ApiException(0, "Can't reach the Commit Call server. If your internet is working, the server may be down; try again in a moment.");
     }
     dynamic decoded;
     try {

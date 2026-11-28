@@ -36,7 +36,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       Padding(
         padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
         child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-          Text('Team', style: AppType.display(36, weight: FontWeight.w500)),
+          Text('Team', style: AppType.display(28, weight: FontWeight.w600)),
           const Spacer(),
           SegmentedButton<bool>(
             segments: const [
@@ -275,7 +275,7 @@ class _Kpi extends StatelessWidget {
                     style: const TextStyle(fontSize: 12, color: AppColors.textDim, fontWeight: FontWeight.w600),
                     overflow: TextOverflow.ellipsis)),
           ]),
-          Text(value, style: AppType.display(34, weight: FontWeight.w500)),
+          Text(value, style: AppType.display(28, weight: FontWeight.w600)),
           Text(sub ?? ' ', style: const TextStyle(fontSize: 11, color: AppColors.textFaint), maxLines: 1, overflow: TextOverflow.ellipsis),
         ]),
       );

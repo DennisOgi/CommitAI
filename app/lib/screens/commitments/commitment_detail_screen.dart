@@ -208,7 +208,7 @@ class _EventRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (IconData icon, String text) = switch (e.kind) {
-      'created' => (Icons.auto_awesome_rounded, e.payload['manual'] == true ? '${e.actorName} added this' : 'Detected by Commit AI on the call'),
+      'created' => (Icons.auto_awesome_rounded, e.payload['manual'] == true ? '${e.actorName} added this' : 'Detected by Commit Call on the call'),
       'confirmed' => (Icons.verified_rounded, e.payload['auto'] == true ? 'Auto-shared (not reviewed within 24h)' : '${e.actorName} confirmed it'),
       'status_changed' => (Icons.swap_horiz_rounded, '${e.actorName} moved it to ${(e.payload['to'] ?? '').toString().replaceAll('_', ' ')}'),
       'due_changed' => (Icons.event_repeat_rounded, '${e.actorName} changed the deadline'),

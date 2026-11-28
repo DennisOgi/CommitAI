@@ -8,7 +8,7 @@ import '../../core/theme.dart';
 import '../../state/app_state.dart';
 import '../../widgets/common.dart';
 
-/// First screen for signed-out users: what Commit AI is, then a clear way in.
+/// First screen for signed-out users: what Commit Call is, then a clear way in.
 /// Personal identity is an email account; the corporate identity is layered on later
 /// from the mode switch.
 class WelcomeScreen extends StatefulWidget {
@@ -75,7 +75,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                     const SizedBox(height: 16),
                     Text(
                       'Call clients from one app, over the internet or to any mobile or landline. '
-                      'Commit AI records work calls, catches what was agreed, and keeps your team in the loop. '
+                      'Commit Call records work calls, catches what was agreed, and keeps your team in the loop. '
                       'Personal calls stay personal.',
                       style: t.bodyLarge?.copyWith(color: AppColors.textDim),
                     ),
@@ -285,7 +285,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       decoration: const InputDecoration(
                         labelText: 'Phone number',
                         hintText: 'e.g. 0803 123 4567',
-                        helperText: 'Friends who have your number will see you on Commit AI',
+                        helperText: 'Friends who have your number will see you on Commit Call',
                         prefixIcon: Icon(Icons.phone_iphone_rounded),
                       ),
                       validator: (v) {
@@ -354,7 +354,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               _signUp = !_signUp;
                               _notice = null;
                             }),
-                    child: Text(_signUp ? 'Already have an account? Sign in' : 'New to Commit AI? Create an account'),
+                    child: Text(_signUp ? 'Already have an account? Sign in' : 'New to Commit Call? Create an account'),
                   ),
                   if (_signUp) ...[const SizedBox(height: 6), const LegalLine()],
                 ]),

@@ -19,6 +19,11 @@ class MainActivity : FlutterFragmentActivity() {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
                     }
                     "stop" -> stopService(Intent(this, CallService::class.java))
+                    "standby" -> {
+                        val intent = Intent(this, StandbyService::class.java)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+                    }
+                    "standbyStop" -> stopService(Intent(this, StandbyService::class.java))
                     "ring" -> CallAlerts.startRinging(
                         this,
                         call.argument<String>("caller") ?: "Incoming call",

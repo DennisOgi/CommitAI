@@ -61,8 +61,8 @@ Future<void> firebaseBackgroundHandler(RemoteMessage message) async {
   await FlutterCallkitIncoming.showCallkitIncoming(CallKitParams(
     id: d['call_id'],
     nameCaller: d['caller_name'] ?? 'Caller',
-    appName: 'Commit AI',
-    handle: work ? 'Work call · recorded' : 'Commit AI',
+    appName: 'Commit Call',
+    handle: work ? 'Work call · recorded' : 'Commit Call',
     type: 0,
     duration: 45000,
     textAccept: 'Accept',

@@ -1,4 +1,4 @@
-"""Commit AI HTTP API.
+"""Commit Call HTTP API.
 
 Run:  uvicorn commitai.api:app --reload
 """
@@ -80,14 +80,14 @@ async def lifespan(_: FastAPI):
         raise RuntimeError("Refusing to start in production:\n  - " + "\n  - ".join(problems))
     if settings.dev_auth:
         log.warning("DEV_AUTH is on: 'Bearer dev:<user_id>' tokens are accepted. Never use this in production.")
-    log.info("Commit AI API starting (env=%s, store=%s, daily=%s, llm=%s, bots=%s)", settings.app_env,
+    log.info("Commit Call API starting (env=%s, store=%s, daily=%s, llm=%s, bots=%s)", settings.app_env,
              type(db).__name__, daily.enabled, settings.ai_provider or "off (rule-based)", settings.bots_enabled)
     task = asyncio.create_task(run_scheduler(db))
     yield
     task.cancel()
 
 
-app = FastAPI(title="Commit AI", version="1.0.0", lifespan=lifespan,
+app = FastAPI(title="Commit Call", version="1.0.0", lifespan=lifespan,
               docs_url=None if settings.is_production else "/docs",
               redoc_url=None, openapi_url=None if settings.is_production else "/openapi.json")
 if settings.cors_origins:
@@ -258,7 +258,7 @@ async def update_settings(body: SettingsBody, user_id: str = CurrentUser):
 
 async def set_my_phone(user_id: str, raw: str, region: str = "NG") -> str | None:
     """Save the user's own number. Everyone who has it in their imported contacts now sees them
-    as "on Commit AI" (free app calls), the way Telegram shows contacts who joined."""
+    as "on Commit Call" (free app calls), the way Telegram shows contacts who joined."""
     prof = await db.get("profiles", id=user_id) or {}
     old = prof.get("phone_e164")
     phone = None
@@ -269,7 +269,7 @@ async def set_my_phone(user_id: str, raw: str, region: str = "NG") -> str | None
         phone = parsed[0]
         other = await db.get("profiles", phone_e164=phone)
         if other and other["id"] != user_id:
-            raise HTTPException(409, "That number is already used by another Commit AI account.")
+            raise HTTPException(409, "That number is already used by another Commit Call account.")
     if phone == old:
         return phone
     await db.update("profiles", {"phone_e164": phone}, id=user_id)
@@ -704,7 +704,7 @@ class ContactBody(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     company: str | None = Field(default=None, max_length=120)
     phone_e164: str | None = Field(default=None, pattern=E164)
-    # Email of a Commit AI user: links the contact to their account so they can be app-called.
+    # Email of a Commit Call user: links the contact to their account so they can be app-called.
     email: str | None = Field(default=None, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     # Or the account id of someone found with /v1/users/search.
     app_user_id: str | None = Field(default=None, max_length=64)
@@ -718,13 +718,13 @@ async def add_contact(body: ContactBody, user_id: str = CurrentUser):
     if body.app_user_id:
         app_user = await db.get("profiles", id=body.app_user_id)
         if not app_user:
-            raise HTTPException(404, "That person no longer has a Commit AI account.")
+            raise HTTPException(404, "That person no longer has a Commit Call account.")
     elif body.email:
         app_user = await db.get("profiles", email=body.email.strip().lower())
     if app_user and app_user["id"] == user_id:
         raise HTTPException(422, "That's you.")
     if not body.phone_e164 and not app_user:
-        raise HTTPException(422, "No Commit AI account uses that email. Add a phone number instead, "
+        raise HTTPException(422, "No Commit Call account uses that email. Add a phone number instead, "
                                  "or ask them to sign up first." if body.email else "Add a phone number or an email.")
     row = {**body.model_dump(exclude={"email", "app_user_id"}), "owner_id": user_id, "org_id": m["org_id"] if m else None,
            "app_user_id": app_user["id"] if app_user else None}
@@ -740,7 +740,7 @@ def _mask_email(email: str | None) -> str | None:
 
 @app.get("/v1/users/search")
 async def search_users(q: str = "", user_id: str = CurrentUser):
-    """Find people on Commit AI to call: by name (2+ characters) or by exact email.
+    """Find people on Commit Call to call: by name (2+ characters) or by exact email.
     Anyone with an account can be found unless they turned "Let people find me" off;
     an exact email always matches. Emails are masked so the list can't be harvested."""
     q = " ".join(q.split())[:80]
@@ -762,7 +762,7 @@ async def search_users(q: str = "", user_id: str = CurrentUser):
     found.pop(user_id, None)
     saved = {c["app_user_id"]: c["id"] for c in await db.select("contacts", owner_id=user_id)
              if c.get("app_user_id")}
-    return [{"user_id": p["id"], "full_name": p.get("full_name") or "Commit AI user",
+    return [{"user_id": p["id"], "full_name": p.get("full_name") or "Commit Call user",
              "email_hint": _mask_email(p.get("email")), "contact_id": saved.get(p["id"])}
             for p in list(found.values())[:20]]
 
@@ -809,7 +809,7 @@ async def _profiles_by(column: str, values: list[str], exclude: str | None = Non
 async def import_contacts(body: ContactImport, user_id: str = CurrentUser):
     """The user's phone address book, imported into their PERSONAL contacts (never the company's).
     Safe to repeat (the app re-syncs quietly): numbers are normalised to E.164 and anything already
-    imported is skipped. Contacts who use Commit AI, matched by phone number or email, are linked so
+    imported is skipped. Contacts who use Commit Call, matched by phone number or email, are linked so
     they can be app-called; that includes earlier imports of people who have joined since."""
     async with _import_locks[user_id]:           # one import at a time per user: no double inserts
         existing = await db.select("contacts", owner_id=user_id, org_id=None)
@@ -844,7 +844,7 @@ async def import_contacts(body: ContactImport, user_id: str = CurrentUser):
         for i in range(0, len(rows), 500):
             await db.insert("contacts", rows[i:i + 500])
 
-        # Contacts imported earlier whose owner has joined Commit AI since.
+        # Contacts imported earlier whose owner has joined Commit Call since.
         linked = 0
         for c in existing:
             uid = by_phone.get(c.get("phone_e164") or "")
@@ -930,11 +930,11 @@ async def start_call(body: OutboundCall, user_id: str = CurrentUser):
     else:
         callee = body.callee_user_id or (contact or {}).get("app_user_id")
         if not callee:
-            raise HTTPException(422, "This person isn't linked to a Commit AI account, so an app call isn't possible. Call their phone number instead.")
+            raise HTTPException(422, "This person isn't linked to a Commit Call account, so an app call isn't possible. Call their phone number instead.")
         if callee == user_id:
             raise HTTPException(422, "you can't call yourself")
         if not await db.get("profiles", id=callee):
-            raise HTTPException(404, "That person no longer has a Commit AI account.")
+            raise HTTPException(404, "That person no longer has a Commit Call account.")
         phone, channel, counterpart = None, "app", await name_of(callee)
 
     # App calls: the callee may record even if the caller doesn't, so allow recording in the room
@@ -986,7 +986,7 @@ async def start_call(body: OutboundCall, user_id: str = CurrentUser):
             org_for_bot = await org_of(await active_membership(employees[0]["user_id"]))
         await bot_runner.spawn({
             "call_id": caller_call["id"], "room_url": room.url,
-            "token": await daily.token(room.name, user_id="commit-ai-bot", user_name="Commit AI", owner=True),
+            "token": await daily.token(room.name, user_id="commit-ai-bot", user_name="Commit Call", owner=True),
             "record": bool(employees), "employees": employees, "keep_audio": work_audio,
             "dialout": {"phoneNumber": phone, **({"callerId": settings.daily_caller_id} if settings.daily_caller_id else {})}
                        if body.channel == "pstn" else None,
@@ -1292,7 +1292,7 @@ async def daily_dialin(request: Request):
     if settings.bots_enabled and daily.enabled:
         await bot_runner.spawn({
             "call_id": row["id"], "room_url": room.url,
-            "token": await daily.token(room.name, user_id="commit-ai-bot", user_name="Commit AI", owner=True),
+            "token": await daily.token(room.name, user_id="commit-ai-bot", user_name="Commit Call", owner=True),
             "record": True, "employees": [{"user_id": employee, "call_id": row["id"]}],
             "dialin": {"call_id": call_id, "call_domain": call_domain},
             "voicemail": None if on_duty else
@@ -1547,7 +1547,7 @@ async def commitment_events(cid: str, user_id: str = CurrentUser):
     await commitment_for(user_id, cid)
     events = await db.select("commitment_events", commitment_id=cid, order="created_at")
     for e in events:
-        e["actor_name"] = await name_of(e.get("actor_id")) if e.get("actor_id") else "Commit AI"
+        e["actor_name"] = await name_of(e.get("actor_id")) if e.get("actor_id") else "Commit Call"
     return events
 
 

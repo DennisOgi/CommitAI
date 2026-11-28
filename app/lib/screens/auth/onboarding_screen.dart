@@ -182,7 +182,7 @@ class _RecordPage extends StatelessWidget {
   Widget build(BuildContext context) => _Page(
         kicker: 'On work calls',
         title: 'Every commitment, caught.',
-        body: 'Both sides hear that the call is recorded. As you talk, Commit AI notes what was agreed, '
+        body: 'Both sides hear that the call is recorded. As you talk, Commit Call notes what was agreed, '
             'when it’s due and the exact words. After the call you confirm or edit each one. You review it first; '
             'unreviewed items are shared with your manager after 24 hours.',
         art: Container(
@@ -263,7 +263,7 @@ class _PermissionsPageState extends State<_PermissionsPage> {
       _imported = r == null
           ? null
           : r.onApp > 0
-              ? '${r.imported} contacts imported · ${r.onApp} on Commit AI'
+              ? '${r.imported} contacts imported · ${r.onApp} on Commit Call'
               : '${r.imported} contacts imported';
     });
   }
@@ -297,7 +297,7 @@ class _PermissionsPageState extends State<_PermissionsPage> {
             why: _importing
                 ? 'Importing your contacts…'
                 : _imported ??
-                    'See which of your contacts are on Commit AI and call them free. Kept private to you, never shared with your company.',
+                    'See which of your contacts are on Commit Call and call them free. Kept private to you, never shared with your company.',
             status: _status[Permission.contacts],
             onAllow: () => _ask(Permission.contacts),
           ),

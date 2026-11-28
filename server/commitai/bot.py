@@ -1,4 +1,4 @@
-"""The Commit AI call bot (Pipecat + Daily).
+"""The Commit Call call bot (Pipecat + Daily).
 
 One bot joins every call that needs it, as a silent, invisible participant:
 
@@ -75,7 +75,7 @@ class CallBot:
         speaks = bool(settings.ai_provider and (cfg.get("disclosure") or self.voicemail_greeting or cfg.get("dialin")))
         dialin = cfg.get("dialin")
         self.transport = DailyTransport(
-            cfg["room_url"], cfg["token"], "Commit AI",
+            cfg["room_url"], cfg["token"], "Commit Call",
             DailyParams(
                 api_key=settings.daily_api_key,
                 api_url=settings.daily_api_url,

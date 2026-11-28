@@ -70,14 +70,14 @@ abstract class Backend {
   Future<OrgMember> updateMember(String id, Map<String, dynamic> patch) async => _noDemo();
   Future<MemberCredentials> resetMemberPin(String id, {bool unlinkAccount = false}) async => _noDemo();
 
-  /// People on Commit AI matching a name (2+ letters) or an exact email.
+  /// People on Commit Call matching a name (2+ letters) or an exact email.
   Future<List<PlatformUser>> searchUsers(String q) async => [];
 
   /// Save someone found by search as a contact.
   Future<Contact> addAppUser({required String name, required String userId}) =>
       throw UnsupportedError('Not available in the demo.');
 
-  /// The user's own phone number, so people who have it saved see them on Commit AI.
+  /// The user's own phone number, so people who have it saved see them on Commit Call.
   /// "" removes it. Returns the saved number in international format.
   Future<String?> setMyPhone(String phone) async => phone.isEmpty ? null : phone;
 

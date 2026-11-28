@@ -8,7 +8,7 @@ import 'call_engine.dart';
 /// Voice calls over Daily. This is the only file that touches the Daily SDK,
 /// so SDK upgrades are contained here.
 ///
-/// Daily is voice-only here: the camera stays off, and the Commit AI bot
+/// Daily is voice-only here: the camera stays off, and the Commit Call bot
 /// (user id "commit-ai-bot") is hidden from the participant list.
 class DailyCallEngine implements CallEngine {
   static const botUserId = 'commit-ai-bot';

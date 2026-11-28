@@ -12,6 +12,7 @@ import '../../state/app_state.dart';
 import '../../widgets/common.dart';
 import '../../widgets/loader.dart';
 import '../../widgets/phone_sheet.dart';
+import 'person_sheet.dart';
 import '../call/call_actions.dart';
 
 class ContactsScreen extends StatefulWidget {
@@ -25,10 +26,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
   String _q = '';
   bool _importing = false;
 
-  /// The round button: everyone, or only contacts who are on Commit AI (free app calls).
+  /// The round button: everyone, or only contacts who are on Commit Call (free app calls).
   bool _onAppOnly = false;
 
-  // "On Commit AI": everyone with an account, found by name or email.
+  // "On Commit Call": everyone with an account, found by name or email.
   Timer? _debounce;
   List<PlatformUser> _people = [];
   bool _searching = false;
@@ -115,7 +116,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
           child: Text(
             q.contains('@')
-                ? 'No account uses that email yet. Ask them to download Commit AI.'
+                ? 'No account uses that email yet. Ask them to download Commit Call.'
                 : 'No one named "$q" yet. Try their full name or their email.',
             style: const TextStyle(fontSize: 13, color: AppColors.textFaint),
           ),
@@ -125,7 +126,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           contentPadding: const EdgeInsets.fromLTRB(20, 2, 12, 2),
           leading: Avatar(name: u.fullName),
           title: Text(u.fullName, style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: Text(u.emailHint ?? 'On Commit AI'),
+          subtitle: Text(u.emailHint ?? 'On Commit Call'),
           trailing: Row(mainAxisSize: MainAxisSize.min, children: [
             if (u.contactId == null)
               IconButton(
@@ -157,9 +158,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         icon: const Icon(Icons.contacts_rounded, size: 32),
         title: const Text('Import your phone contacts?'),
         content: const Text(
-          'Commit AI will copy the names, numbers and emails from your phone so you can call them here, '
-          'and show which contacts are on Commit AI (free app calls).\n\n'
-          'They go into your Personal contacts only: never shared with your company, managers or colleagues.',
+          'See which of your contacts are on Commit Call and call them free. Your contacts stay private to you.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Not now')),
@@ -180,9 +179,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
       toast(
         context,
         r.imported == 0
-            ? 'Your contacts are up to date${r.onApp > 0 ? ' · ${r.onApp} on Commit AI' : ''}.'
+            ? 'Your contacts are up to date${r.onApp > 0 ? ' · ${r.onApp} on Commit Call' : ''}.'
             : 'Imported ${r.imported} contact${r.imported == 1 ? '' : 's'}'
-                '${r.onApp > 0 ? ' · ${r.onApp} on Commit AI' : ''}'
+                '${r.onApp > 0 ? ' · ${r.onApp} on Commit Call' : ''}'
                 '${app.corporate ? '. Switch to Personal to see them' : ''}.',
         icon: Icons.check_circle_rounded,
       );
@@ -212,7 +211,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         context: context,
         builder: (d) => AlertDialog(
           title: const Text('Allow access to contacts'),
-          content: const Text('Contacts access is turned off for Commit AI. Open Settings → Permissions → '
+          content: const Text('Contacts access is turned off for Commit Call. Open Settings → Permissions → '
               'Contacts and choose Allow, then come back and try again.'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
@@ -225,45 +224,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
       toast(context, 'Contacts permission was not given.', icon: Icons.lock_outline_rounded);
     }
     return false;
-  }
-
-  void _open(Contact c) {
-    final kind = c.phone == null ? NumberKind.unknown : numberKind(c.phone!);
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (sheet) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Avatar(name: c.name, size: 64),
-            const SizedBox(height: 12),
-            Text(c.name, style: Theme.of(context).textTheme.titleLarge),
-            if (c.company != null) Text(c.company!, style: Theme.of(context).textTheme.bodyMedium),
-            const SizedBox(height: 18),
-            if (c.onApp)
-              _CallOption(
-                icon: Icons.wifi_calling_3_rounded,
-                title: 'App call',
-                subtitle: 'HD voice over the internet · free',
-                onTap: () {
-                  Navigator.pop(sheet);
-                  placeCall(context, name: c.name, detail: c.company, calleeUserId: c.appUserId, contactId: c.id, isClient: c.isClient);
-                },
-              ),
-            if (c.phone != null)
-              _CallOption(
-                icon: kind == NumberKind.landline ? Icons.phone_rounded : Icons.phone_android_rounded,
-                title: kind == NumberKind.landline ? 'Call landline' : 'Call mobile',
-                subtitle: prettyPhone(c.phone),
-                onTap: () {
-                  Navigator.pop(sheet);
-                  placeCall(context, name: c.name, detail: c.company, pstn: true, phone: c.phone, contactId: c.id, isClient: c.isClient);
-                },
-              ),
-          ]),
-        ),
-      ),
-    );
   }
 
   Future<void> _add() async {
@@ -318,7 +278,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
               autocorrect: false,
               decoration: const InputDecoration(
                 labelText: 'Email (for free app calls)',
-                helperText: 'If they use Commit AI, you can call them over the internet',
+                helperText: 'If they use Commit Call, you can call them over the internet',
                 prefixIcon: Icon(Icons.wifi_calling_3_rounded),
               ),
             ),
@@ -341,7 +301,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         email: email.text.trim().isEmpty ? null : email.text.trim(),
       );
       if (mounted) {
-        toast(context, c.onApp ? '${c.name} is on Commit AI: app calls are free.' : '${c.name} saved.',
+        toast(context, c.onApp ? '${c.name} is on Commit Call: app calls are free.' : '${c.name} saved.',
             icon: c.onApp ? Icons.wifi_calling_3_rounded : Icons.check_rounded);
       }
       app.refresh();
@@ -378,12 +338,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 SliverToBoxAdapter(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                      padding: const EdgeInsets.fromLTRB(20, 14, 12, 10),
                       child: Row(children: [
                         Expanded(
                           child: Text(
-                            _onAppOnly ? 'On Commit AI' : (app.corporate ? 'Clients' : 'Contacts'),
-                            style: AppType.display(36, weight: FontWeight.w500),
+                            _onAppOnly ? 'On Commit Call' : (app.corporate ? 'Clients' : 'Contacts'),
+                            style: AppType.display(28, weight: FontWeight.w600),
                           ),
                         ),
                         IconButton.filledTonal(
@@ -399,7 +359,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                         onChanged: _onQuery,
                         textInputAction: TextInputAction.search,
                         decoration: InputDecoration(
-                          hintText: app.corporate ? 'Search clients, or anyone on Commit AI' : 'Search contacts or anyone on Commit AI',
+                          hintText: app.corporate ? 'Search clients, or anyone on Commit Call' : 'Search contacts or anyone on Commit Call',
                           prefixIcon: const Icon(Icons.search_rounded),
                         ),
                       ),
@@ -407,7 +367,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     if (app.corporate)
                       const Padding(
                         padding: EdgeInsets.fromLTRB(20, 12, 20, 0),
-                        child: Text('Shared company directory. Personal contacts are hidden in Work mode.',
+                        child: Text('Your company’s client directory',
                             style: TextStyle(fontSize: 12, color: AppColors.textFaint)),
                       ),
                     if (!app.corporate) const AddPhoneNudge(),
@@ -419,9 +379,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                           child: ListTile(
                             leading: Icon(Icons.contacts_rounded, color: app.palette.accent),
                             title: const Text('Import your phone contacts', style: TextStyle(fontWeight: FontWeight.w700)),
-                            subtitle: Text(app.corporate
-                                ? 'Saved to your private Personal contacts (switch to Personal to see them).'
-                                : 'See who’s on Commit AI and call them free. Private to you.'),
+                            subtitle: const Text('See who’s on Commit Call. Private to you.'),
                             trailing: _importing
                                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                                 : const Icon(Icons.chevron_right_rounded),
@@ -433,7 +391,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                       const Padding(
                         padding: EdgeInsets.fromLTRB(24, 32, 24, 0),
                         child: Text(
-                          'None of your contacts are on Commit AI yet. When someone you have saved joins, they’ll show up here.',
+                          'None of your contacts are on Commit Call yet.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: AppColors.textDim),
                         ),
@@ -451,11 +409,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
                       title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: Text([if (c.company != null) c.company!, prettyPhone(c.phone)].where((s) => s.isNotEmpty).join(' · ')),
                       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                        if (c.onApp) Pill('On Commit AI', color: app.palette.accent, dense: true),
+                        if (c.onApp) Pill('On Commit Call', color: app.palette.accent, dense: true),
                         const SizedBox(width: 4),
                         const Icon(Icons.chevron_right_rounded, color: AppColors.textFaint),
                       ]),
-                      onTap: () => _open(c),
+                      onTap: () => showPersonSheet(context,
+                          name: c.name, phone: c.phone, userId: c.appUserId, contactId: c.id, isClient: c.isClient),
                     );
                   },
                 ),
@@ -470,7 +429,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 heroTag: 'contacts-filter',
                 onPressed: () => setState(() => _onAppOnly = !_onAppOnly),
                 icon: Icon(_onAppOnly ? Icons.people_alt_rounded : Icons.wifi_calling_3_rounded),
-                label: Text(_onAppOnly ? 'All contacts' : 'On Commit AI · $onAppCount'),
+                label: Text(_onAppOnly ? 'All contacts' : 'On Commit Call · $onAppCount'),
               ),
             ),
           ]);
@@ -478,26 +437,4 @@ class _ContactsScreenState extends State<ContactsScreen> {
       ),
     );
   }
-}
-
-class _CallOption extends StatelessWidget {
-  const _CallOption({required this.icon, required this.title, required this.subtitle, required this.onTap});
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Card(
-          child: ListTile(
-            onTap: onTap,
-            leading: CircleAvatar(backgroundColor: AppColors.success.withValues(alpha: .15), child: Icon(icon, color: AppColors.success)),
-            title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text(subtitle),
-            trailing: const Icon(Icons.call_rounded, color: AppColors.success),
-          ),
-        ),
-      );
 }

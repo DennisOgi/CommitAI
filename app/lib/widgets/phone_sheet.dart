@@ -48,7 +48,7 @@ class _PhoneSheetState extends State<_PhoneSheet> {
           Text('Your phone number', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(
-              'People who have this number saved will see you on Commit AI and can call you free. '
+              'People who have this number saved will see you on Commit Call and can call you free. '
               'It isn’t shown to anyone else.',
               style: Theme.of(context).textTheme.bodyMedium),
           const SizedBox(height: 18),

@@ -29,7 +29,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> with SingleTick
   @override
   void initState() {
     super.initState();
-    CallService.ring(widget.call.callerName.split(' · ').first, work: widget.call.mode == AppMode.corporate);
     _timeout = Timer(const Duration(seconds: 45), () => _close('Missed call'));
     // If the caller gives up (or another device answers), stop ringing here too.
     _watch = Timer.periodic(const Duration(seconds: 2), (_) async {
@@ -112,7 +111,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> with SingleTick
             Text(parts.first, style: AppType.display(38, weight: FontWeight.w500)),
             if (parts.length > 1) Text(parts.last, style: const TextStyle(fontSize: 16, color: AppColors.textDim)),
             const SizedBox(height: 6),
-            const Text('Incoming call · Commit AI', style: TextStyle(color: AppColors.textDim, fontSize: 15)),
+            const Text('Incoming call · Commit Call', style: TextStyle(color: AppColors.textDim, fontSize: 15)),
             const Spacer(flex: 2),
             Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
               _Action(color: AppColors.danger, icon: Icons.call_end_rounded, label: 'Decline', onTap: _decline, rotate: false),

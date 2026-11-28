@@ -43,6 +43,8 @@ class _CommitAppState extends State<CommitApp> {
     final call = state.incoming.value;
     if (call == null) return;
     state.incoming.value = null;
+    final ctx = navigatorKey.currentContext;
+    if (ctx != null) ScaffoldMessenger.maybeOf(ctx)?.clearSnackBars(); // nothing may cover the call
     navigatorKey.currentState?.push(PageRouteBuilder(
       opaque: true,
       transitionDuration: const Duration(milliseconds: 350),
@@ -66,7 +68,7 @@ class _CommitAppState extends State<CommitApp> {
       child: ListenableBuilder(
         listenable: state,
         builder: (context, _) => MaterialApp(
-          title: 'Commit AI',
+          title: 'Commit Call',
           debugShowCheckedModeBanner: false,
           navigatorKey: navigatorKey,
           theme: buildTheme(state.palette),
@@ -102,7 +104,8 @@ class SplashScreen extends StatelessWidget {
             const CommitLogo(size: 96),
             const SizedBox(height: 20),
             // Same lettering as the native launch screen, so there's no visible jump.
-            Image.asset('assets/branding/wordmark_text.png', width: 112, semanticLabel: 'Commit'),
+            const Text('Commit Call',
+                style: TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -.3)),
             const SizedBox(height: 32),
             SizedBox(
               width: 120,
@@ -130,7 +133,7 @@ class OfflineScreen extends StatelessWidget {
         child: Center(
           child: EmptyState(
             icon: Icons.wifi_off_rounded,
-            title: 'Can’t reach Commit AI',
+            title: 'Can’t reach Commit Call',
             body: 'Check your internet connection. You’re still signed in; we’ll pick up where you left off.',
             action: Column(mainAxisSize: MainAxisSize.min, children: [
               FilledButton.icon(
@@ -154,7 +157,7 @@ class CommitLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Semantics(
-        label: 'Commit AI',
+        label: 'Commit Call',
         image: true,
         child: Container(
           width: size,
@@ -175,7 +178,7 @@ class CommitWordmark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Semantics(
-        label: 'Commit AI',
+        label: 'Commit Call',
         image: true,
         child: Image.asset('assets/branding/logo_wordmark.png', height: height, filterQuality: FilterQuality.medium),
       );

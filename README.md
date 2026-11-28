@@ -1,4 +1,4 @@
-# Commit AI
+# Commit Call
 
 **Business calling that remembers every commitment.**
 
@@ -50,7 +50,7 @@ mode is on, personal calls are held, not rung.
 - **One app, two modes.** Personal and Work, each with its own contacts, call history and colour
   (sea-glass green for Personal, Commit blue for Work), so you always know which identity you're
   calling from.
-- **Call anyone.** Free app-to-app calls to other Commit AI users (added by email), and calls to GSM
+- **Call anyone.** Free app-to-app calls to other Commit Call users (added by email), and calls to GSM
   mobiles and landlines (via Daily's phone network).
 - **Live hints during the call.** "Commitment detected · by Friday" cards appear as you speak.
   A **Flag commitment** button marks a moment the AI should look at closely.
@@ -77,13 +77,13 @@ mode is on, personal calls are held, not rung.
   person gets an employee ID and a one-time PIN to share; if the admin added their email, they can
   instead tap **Join** when they sign up and choose their own PIN. One-time PINs must be changed after the
   first sign-in. Managers see their reporting line; admins see everyone.
-- **Find anyone on Commit AI**: app-to-app calls aren't limited to your company. Anyone with an
+- **Find anyone on Commit Call**: app-to-app calls aren't limited to your company. Anyone with an
   account can search by name (or exact email) from the Contacts search box, call them for free, and
   save them as a contact. Emails are shown masked; "Let people find me" (menu) hides you from name
   search. A work-mode call to someone outside your company who is in Personal mode rings normally.
 - **Import phone contacts** (Personal mode): with permission, the phone's address book is imported into
   the user's private contacts; numbers are normalised (`0803…` → `+234803…`), duplicates skipped, and
-  contacts who use Commit AI are marked for free app calls. In Work mode, a client can be picked from the
+  contacts who use Commit Call are marked for free app calls. In Work mode, a client can be picked from the
   phone's contacts.
 - The employee's own reliability score.
 - **"While you were at work" digest.** Switching back to Personal shows who tried to reach you.
@@ -480,7 +480,7 @@ All `/v1` endpoints take `Authorization: Bearer <Supabase access token>`.
 | `PATCH /v1/org/members/{id}`, `POST …/{id}/reset-pin` | role, title, manager, deactivate; new one-time PIN |
 | `GET /v1/me/invites`, `POST /v1/org/join` | email invites; join with your own PIN |
 | `POST /v1/corporate/pin` | change your Work PIN |
-| `GET /v1/users/search?q=` | find people on Commit AI by name (2+ chars) or exact email |
+| `GET /v1/users/search?q=` | find people on Commit Call by name (2+ chars) or exact email |
 | `POST /v1/contacts/import` | import the phone's address book into personal contacts |
 | `PATCH /v1/me/settings` | e.g. `record_personal_calls` |
 | `POST /v1/calls` | start a call (`channel: app` or `pstn`) → room URL + token |
@@ -560,7 +560,7 @@ dart run flutter_native_splash:create
 
 | Symptom | Cause / fix |
 |---|---|
-| "Can't reach the Commit AI server" | The server or tunnel isn't running, or the APK points at an old tunnel address. Check `GET /health` on the `API_URL`. |
+| "Can't reach the Commit Call server" | The server or tunnel isn't running, or the APK points at an old tunnel address. Check `GET /health` on the `API_URL`. |
 | The other phone doesn't ring | Without push, the callee must have the app open. Check both are in the same mode (Work ↔ Work or Personal ↔ Personal). |
 | Call connects but no audio / stuck connecting | Check microphone permission. The app now times out after 25 s and reports the failure to the server log (`APP PROBLEM …`). |
 | No transcript / commitments after a work call | Check the bot started (server log), Daily has a payment method, and the Gemini key works. Calls whose transcript never arrives are marked failed after 15 min. |
@@ -584,7 +584,7 @@ two-stage deadline reminders; 51 server tests and the Flutter test suite.
 - Moving PSTN dial-out from the bot to the server is planned (so a phone call connects even if the bot
   fails), pending a number to test with.
 - A phone's own SIM calls can't be controlled by any app; "personal calls are held at work" applies to
-  calls that go through Commit AI.
+  calls that go through Commit Call.
 - The login rate limiter is per process; use a shared store (e.g. Redis) when running several API
   replicas.
 

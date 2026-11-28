@@ -139,7 +139,7 @@ class DemoBackend extends Backend {
         completedAt: done,
       );
       _commitments.add(row);
-      _events[row.id] = [CommitmentEvent(kind: 'created', actorName: 'Commit AI', at: row.createdAt, payload: {})];
+      _events[row.id] = [CommitmentEvent(kind: 'created', actorName: 'Commit Call', at: row.createdAt, payload: {})];
       return row;
     }
 
@@ -430,7 +430,7 @@ class DemoBackend extends Backend {
     ];
     for (final c in found) {
       _commitments.add(c);
-      _events[c.id] = [CommitmentEvent(kind: 'created', actorName: 'Commit AI', at: now, payload: {})];
+      _events[c.id] = [CommitmentEvent(kind: 'created', actorName: 'Commit Call', at: now, payload: {})];
     }
     _replace(callId, (c) => _with(c, processing: 'done', count: found.length, sentiment: 'mixed',
         summary: '$client raised late deliveries. You committed to ${found.where((f) => !f.byClient).length} follow-ups '

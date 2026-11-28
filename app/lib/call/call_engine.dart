@@ -25,7 +25,7 @@ class RemoteJoined extends CallEngineEvent {
 
 class RemoteLeft extends CallEngineEvent {}
 
-/// App message from the Commit AI bot (commitment hints, captions).
+/// App message from the Commit Call bot (commitment hints, captions).
 class BotMessage extends CallEngineEvent {
   BotMessage(this.data);
   final Map<String, dynamic> data;

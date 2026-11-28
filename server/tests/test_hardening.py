@@ -136,7 +136,7 @@ def test_add_contact_by_email_links_app_account(c):
     r = c.post("/v1/contacts", headers=H(BELLO), json={"name": "Chidi", "email": "Chidi@Example.com"})
     assert r.status_code == 200 and r.json()["app_user_id"] == CHIDI
     r = c.post("/v1/contacts", headers=H(BELLO), json={"name": "Nobody", "email": "nobody@example.com"})
-    assert r.status_code == 422 and "No Commit AI account" in r.json()["detail"]
+    assert r.status_code == 422 and "No Commit Call account" in r.json()["detail"]
     r = c.post("/v1/contacts", headers=H(BELLO), json={"name": "Phone only", "phone_e164": "+2348031234567"})
     assert r.status_code == 200 and r.json()["app_user_id"] is None
 
@@ -188,12 +188,12 @@ def test_import_phone_contacts(c):
     body = {"contacts": [
         {"name": "Mum", "phones": ["0803 123 4567"]},                          # local number -> +234
         {"name": "Mum again", "phones": ["+234 803 123 4567"]},                # duplicate number
-        {"name": "Chidi", "phones": [], "emails": ["chidi@example.com"]},       # Commit AI user by email
+        {"name": "Chidi", "phones": [], "emails": ["chidi@example.com"]},       # Commit Call user by email
         {"name": "Office", "phones": ["01 270 0000", "0809 999 0000"]},        # prefers the mobile
         {"name": "Junk", "phones": ["12"]},                                     # not dialable, no email
     ]}
     r = c.post("/v1/contacts/import", headers=H(KEMI), json=body).json()
-    assert r["imported"] == 3 and r["skipped"] == 2 and r["on_app"] >= 1   # on_app: all contacts on Commit AI
+    assert r["imported"] == 3 and r["skipped"] == 2 and r["on_app"] >= 1   # on_app: all contacts on Commit Call
     mine = {x["name"]: x for x in c.get("/v1/contacts", headers=H(KEMI)).json()}
     assert mine["Mum"]["phone_e164"] == "+2348031234567" and mine["Office"]["phone_e164"] == "+2348099990000"
     assert mine["Chidi"]["app_user_id"] == CHIDI and all(x["org_id"] is None for x in mine.values())

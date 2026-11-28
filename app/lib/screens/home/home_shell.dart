@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/format.dart';
@@ -151,7 +152,7 @@ class _HomeShellState extends State<HomeShell> {
               ListTile(
                 leading: const Icon(Icons.domain_add_rounded),
                 title: const Text('Register your company'),
-                subtitle: const Text('Bring your team onto Commit AI'),
+                subtitle: const Text('Bring your team onto Commit Call'),
                 onTap: () async {
                   Navigator.pop(sheet);
                   if (await showRegisterCompany(context) && mounted) {
@@ -200,7 +201,7 @@ class _HomeShellState extends State<HomeShell> {
               builder: (context, setSheet) => SwitchListTile(
                 secondary: const Icon(Icons.fiber_manual_record_rounded),
                 title: const Text('Record my personal calls'),
-                subtitle: const Text('Recorded only temporarily to find your commitments, then deleted. Never shared with your company.'),
+                subtitle: const Text('Kept only to find your commitments, then deleted.'),
                 value: app.recordsPersonalCalls,
                 onChanged: (v) async {
                   final err = await app.setRecordPersonalCalls(v);
@@ -213,7 +214,7 @@ class _HomeShellState extends State<HomeShell> {
               builder: (context, setSheet) => SwitchListTile(
                 secondary: const Icon(Icons.travel_explore_rounded),
                 title: const Text('Let people find me'),
-                subtitle: const Text('Anyone on Commit AI can search your name and call you. '
+                subtitle: const Text('Anyone on Commit Call can search your name and call you. '
                     'Off: only people who know your email can.'),
                 value: app.discoverable,
                 onChanged: (v) async {
@@ -223,6 +224,19 @@ class _HomeShellState extends State<HomeShell> {
                 },
               ),
             ),
+            if (defaultTargetPlatform == TargetPlatform.android && !app.isDemo)
+              StatefulBuilder(
+                builder: (context, setSheet) => SwitchListTile(
+                  secondary: const Icon(Icons.ring_volume_rounded),
+                  title: const Text('Ring when the app is closed'),
+                  subtitle: const Text('Calls reach you while you’re in other apps.'),
+                  value: app.ringInBackground,
+                  onChanged: (v) async {
+                    await app.setRingInBackground(v);
+                    setSheet(() {});
+                  },
+                ),
+              ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout_rounded, color: AppColors.danger),
@@ -309,7 +323,7 @@ class _HomeShellState extends State<HomeShell> {
                                       style: const TextStyle(fontSize: 12.5, color: AppColors.textDim, fontWeight: FontWeight.w600)),
                                 ),
                               ])
-                            : Text(app.recordsPersonalCalls ? 'Recorded for you only · private' : 'Private · not recorded',
+                            : Text(app.recordsPersonalCalls ? 'Private' : 'Not recorded',
                                 key: const ValueKey('personal'),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
